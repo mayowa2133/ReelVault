@@ -1,0 +1,349 @@
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+
+from app.config import Settings, get_settings
+from app.models.schemas import ContentPillar, ProcessingStatus, ProcessingTaskPayload, ReelReference, SheetRow
+from app.services.google_sheets_service import GoogleSheetsService
+from app.services.instagram_service import InstagramService
+from app.services.pillar_service import PillarParseKind, PillarService
+from app.services.task_queue_service import CloudTasksQueueService
+from app.services.telegram_service import TelegramService
+from app.services.workflow_service import process_reel_inspiration
+from app.utils.errors import public_error_message
+from app.utils.logging import get_logger
+
+router = APIRouter(tags=["telegram"])
+logger = get_logger(__name__)
+
+
+@router.post("/webhook/telegram")
+async def telegram_webhook(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, int | bool | str]:
+    if settings.telegram_webhook_secret:
+        supplied_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
+        if supplied_secret != settings.telegram_webhook_secret:
+            raise HTTPException(status_code=401, detail="Invalid Telegram webhook secret")
+
+    payload = await request.json()
+    telegram = TelegramService(settings)
+
+    callback = telegram.parse_callback_query(payload)
+    if callback is not None:
+        return await handle_pillar_callback(callback, telegram, background_tasks, settings)
+
+    incoming = telegram.parse_update(payload)
+
+    if incoming is None:
+        return {"ok": True, "queued": 0, "message": "No text message found"}
+
+    if not telegram.is_allowed_user(incoming.user_id):
+        logger.warning("telegram_unauthorized_user", extra={"telegram_user_id": incoming.user_id})
+        return {"ok": True, "queued": 0, "message": "Ignored unauthorized user"}
+
+    reels = InstagramService.extract_reel_urls(incoming.text)
+    if not reels:
+        try:
+            await telegram.send_message_async(
+                incoming.chat_id,
+                "Please send one or more Instagram Reel URLs, for example: "
+                "https://www.instagram.com/reel/SHORTCODE/",
+            )
+        except Exception as exc:
+            logger.warning("telegram_invalid_url_reply_failed", extra={"error": public_error_message(exc)})
+        return {"ok": True, "queued": 0, "message": "No reel URLs found"}
+
+    pillar_result = PillarService.parse_message(incoming.text)
+    if pillar_result.kind == PillarParseKind.AMBIGUOUS:
+        candidates = ", ".join(pillar.value for pillar in pillar_result.candidates)
+        try:
+            await telegram.send_message_async(
+                incoming.chat_id,
+                f"I found multiple possible pillars ({candidates}). Please send one Reel with one pillar.",
+            )
+        except Exception as exc:
+            logger.warning("telegram_ambiguous_pillar_reply_failed", extra={"error": public_error_message(exc)})
+        return {"ok": True, "queued": 0, "message": "Ambiguous pillar"}
+
+    if pillar_result.should_confirm and pillar_result.pillar:
+        pending_count = await create_pending_pillar_confirmations(
+            reels=reels,
+            chat_id=incoming.chat_id,
+            pillar_result=pillar_result,
+            telegram=telegram,
+            settings=settings,
+        )
+        return {"ok": True, "queued": 0, "pending": pending_count}
+
+    start_message = (
+        "Got it - saving this Reel inspiration now."
+        if len(reels) == 1
+        else f"Got it - saving {len(reels)} Reel inspirations now."
+    )
+    try:
+        await telegram.send_message_async(incoming.chat_id, start_message)
+    except Exception as exc:
+        logger.warning("telegram_start_reply_failed", extra={"error": public_error_message(exc)})
+
+    initial_pillar = pillar_result.pillar if pillar_result.kind in {PillarParseKind.EXACT, PillarParseKind.ALIAS} else None
+    initial_pillar_source = pillar_result.source if initial_pillar else ""
+    queued_count = 0
+    for reel in reels:
+        if await schedule_reel_processing(
+            reel=reel,
+            chat_id=incoming.chat_id,
+            settings=settings,
+            background_tasks=background_tasks,
+            telegram=telegram,
+            initial_pillar=initial_pillar,
+            initial_pillar_source=initial_pillar_source,
+        ):
+            queued_count += 1
+
+    return {"ok": True, "queued": queued_count}
+
+
+async def create_pending_pillar_confirmations(
+    *,
+    reels,
+    chat_id: int,
+    pillar_result,
+    telegram: TelegramService,
+    settings: Settings,
+) -> int:
+    sheets = GoogleSheetsService(settings)
+    pending_count = 0
+    for reel in reels:
+        row = SheetRow.from_reel(reel)
+        row.status = ProcessingStatus.PENDING_PILLAR_CONFIRMATION.value
+        row.pillar = pillar_result.pillar.value
+        row.pillar_source = pillar_result.source
+        row.pillar_confidence = f"{pillar_result.confidence or 0:.2f}"
+        try:
+            row_index = sheets.append_row(row)
+            await telegram.send_pillar_confirmation_async(chat_id, row_index, pillar_result.pillar, reel.url)
+            pending_count += 1
+        except Exception as exc:
+            logger.warning(
+                "pending_pillar_confirmation_failed",
+                extra={"shortcode": reel.shortcode, "error": public_error_message(exc)},
+            )
+            try:
+                await telegram.send_message_async(
+                    chat_id,
+                    f"I could not create a pending confirmation for {reel.url}: {public_error_message(exc)}",
+                )
+            except Exception as send_exc:
+                logger.warning("telegram_pending_pillar_failure_reply_failed", extra={"error": public_error_message(send_exc)})
+    return pending_count
+
+
+async def handle_pillar_callback(
+    callback,
+    telegram: TelegramService,
+    background_tasks: BackgroundTasks,
+    settings: Settings,
+) -> dict[str, int | bool | str]:
+    if not telegram.is_allowed_user(callback.user_id):
+        logger.warning("telegram_unauthorized_callback", extra={"telegram_user_id": callback.user_id})
+        return {"ok": True, "queued": 0, "message": "Ignored unauthorized user"}
+
+    action = PillarService.parse_callback_data(callback.data)
+    if action is None:
+        return {"ok": True, "queued": 0, "message": "Ignored callback"}
+
+    try:
+        await telegram.answer_callback_query_async(callback.callback_query_id)
+    except Exception as exc:
+        logger.warning("telegram_callback_answer_failed", extra={"error": public_error_message(exc)})
+
+    sheets = GoogleSheetsService(settings)
+    try:
+        row = sheets.get_row(action.row_index)
+    except Exception as exc:
+        await telegram.send_message_async(callback.chat_id, f"I could not find that pending Reel row: {public_error_message(exc)}")
+        return {"ok": True, "queued": 0, "message": "Pending row not found"}
+
+    if row.status != ProcessingStatus.PENDING_PILLAR_CONFIRMATION.value:
+        await acknowledge_callback_choice(
+            telegram,
+            callback.chat_id,
+            callback.message_id,
+            f"This Reel is already marked as {row.status}.",
+        )
+        return {"ok": True, "queued": 0, "message": "Callback already handled"}
+
+    if action.action == "cancel":
+        row.status = ProcessingStatus.CANCELLED.value
+        row.append_error("Cancelled from Telegram pillar confirmation.")
+        try:
+            sheets.update_row(action.row_index, row)
+        except Exception as exc:
+            logger.warning("cancelled_row_update_failed", extra={"row_index": action.row_index, "error": public_error_message(exc)})
+        await acknowledge_callback_choice(telegram, callback.chat_id, callback.message_id, "Cancelled this Reel inspiration.")
+        return {"ok": True, "queued": 0, "message": "Cancelled"}
+
+    reel = InstagramService.normalize_reel_url(row.reel_url)
+    if reel is None:
+        row.status = ProcessingStatus.INVALID_URL.value
+        row.append_error("Stored pending row has an invalid Instagram Reel URL.")
+        try:
+            sheets.update_row(action.row_index, row)
+        except Exception as exc:
+            logger.warning("invalid_pending_url_update_failed", extra={"row_index": action.row_index, "error": public_error_message(exc)})
+        await telegram.send_message_async(callback.chat_id, "That pending row does not have a valid Instagram Reel URL.")
+        return {"ok": True, "queued": 0, "message": "Invalid pending Reel URL"}
+
+    if action.action == "confirm" and action.pillar is not None:
+        row.pillar = action.pillar.value
+        row.pillar_source = "telegram_fuzzy_confirmed"
+        row.pillar_confidence = "1.00"
+        confirmation_text = f"Using {action.pillar.value}. Saving this Reel inspiration now."
+        initial_pillar = action.pillar
+        initial_pillar_source = "telegram_fuzzy_confirmed"
+    else:
+        row.pillar = ""
+        row.pillar_source = "ai"
+        row.pillar_confidence = ""
+        confirmation_text = "Letting AI classify this Reel. Saving this Reel inspiration now."
+        initial_pillar = None
+        initial_pillar_source = "ai"
+
+    row.status = ProcessingStatus.RECEIVED.value
+    try:
+        sheets.update_row(action.row_index, row)
+    except Exception as exc:
+        logger.warning("confirmed_pillar_row_update_failed", extra={"row_index": action.row_index, "error": public_error_message(exc)})
+
+    await acknowledge_callback_choice(telegram, callback.chat_id, callback.message_id, confirmation_text)
+    queued = await schedule_reel_processing(
+        reel=reel,
+        chat_id=callback.chat_id,
+        settings=settings,
+        background_tasks=background_tasks,
+        telegram=telegram,
+        initial_pillar=initial_pillar,
+        initial_pillar_source=initial_pillar_source,
+        existing_row_index=action.row_index,
+    )
+    return {"ok": True, "queued": 1 if queued else 0}
+
+
+async def acknowledge_callback_choice(
+    telegram: TelegramService,
+    chat_id: int,
+    message_id: int | None,
+    text: str,
+) -> None:
+    try:
+        if message_id is not None:
+            await telegram.edit_message_text_async(chat_id, message_id, text)
+        else:
+            await telegram.send_message_async(chat_id, text)
+    except Exception as exc:
+        logger.warning("telegram_callback_ack_failed", extra={"error": public_error_message(exc)})
+
+
+async def schedule_reel_processing(
+    *,
+    reel: ReelReference,
+    chat_id: int,
+    settings: Settings,
+    background_tasks: BackgroundTasks,
+    telegram: TelegramService,
+    initial_pillar: ContentPillar | None = None,
+    initial_pillar_source: str = "",
+    existing_row_index: int | None = None,
+) -> bool:
+    if settings.processing_backend == "cloud_tasks":
+        return await enqueue_cloud_task(
+            reel=reel,
+            chat_id=chat_id,
+            settings=settings,
+            telegram=telegram,
+            initial_pillar=initial_pillar,
+            initial_pillar_source=initial_pillar_source,
+            existing_row_index=existing_row_index,
+        )
+
+    background_tasks.add_task(
+        process_reel_inspiration,
+        reel,
+        chat_id,
+        settings,
+        initial_pillar,
+        initial_pillar_source,
+        existing_row_index,
+    )
+    return True
+
+
+async def enqueue_cloud_task(
+    *,
+    reel: ReelReference,
+    chat_id: int,
+    settings: Settings,
+    telegram: TelegramService,
+    initial_pillar: ContentPillar | None = None,
+    initial_pillar_source: str = "",
+    existing_row_index: int | None = None,
+) -> bool:
+    sheets = GoogleSheetsService(settings)
+    row_index: int | None = existing_row_index
+    try:
+        if row_index is None:
+            row = SheetRow.from_reel(reel)
+        else:
+            row = sheets.get_row(row_index)
+
+        apply_queue_metadata(row, initial_pillar, initial_pillar_source)
+        if row_index is None:
+            row_index = sheets.append_row(row)
+        else:
+            sheets.update_row(row_index, row)
+
+        task_payload = ProcessingTaskPayload(
+            reel=reel,
+            chat_id=chat_id,
+            row_index=row_index,
+            initial_pillar=initial_pillar,
+            initial_pillar_source=initial_pillar_source,
+        )
+        CloudTasksQueueService(settings).enqueue_processing_task(task_payload)
+        return True
+    except Exception as exc:
+        error = public_error_message(exc)
+        logger.warning(
+            "cloud_task_enqueue_failed",
+            extra={"shortcode": reel.shortcode, "row_index": row_index, "error": error},
+        )
+        if row_index is not None:
+            try:
+                row = sheets.get_row(row_index)
+                row.status = ProcessingStatus.QUEUE_FAILED.value
+                row.append_error(f"Cloud Tasks enqueue failed: {error}")
+                sheets.update_row(row_index, row)
+            except Exception as sheet_exc:
+                logger.warning("queue_failed_row_update_failed", extra={"error": public_error_message(sheet_exc)})
+        try:
+            await telegram.send_message_async(chat_id, f"I saved the Reel URL, but could not queue processing: {error}")
+        except Exception as send_exc:
+            logger.warning("telegram_queue_failure_reply_failed", extra={"error": public_error_message(send_exc)})
+        return False
+
+
+def apply_queue_metadata(
+    row: SheetRow,
+    initial_pillar: ContentPillar | None,
+    initial_pillar_source: str,
+) -> None:
+    row.status = ProcessingStatus.QUEUED.value
+    if initial_pillar:
+        row.pillar = initial_pillar.value
+        row.pillar_source = initial_pillar_source
+        row.pillar_confidence = "1.00"
+    elif initial_pillar_source:
+        row.pillar = ""
+        row.pillar_source = initial_pillar_source
+        row.pillar_confidence = ""

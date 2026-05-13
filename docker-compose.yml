@@ -1,0 +1,23 @@
+services:
+  reelvault:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "8000:8000"
+    volumes:
+      - reelvault-temp:/tmp/reelvault
+      - ./secrets/credentials.json:/secrets/credentials.json:ro
+      - ./secrets/token.json:/secrets/token.json
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate --url http://reelvault:8000
+    depends_on:
+      - reelvault
+    restart: unless-stopped
+
+volumes:
+  reelvault-temp:
