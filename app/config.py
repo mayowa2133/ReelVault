@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     cloud_tasks_target_url: str | None = None
     task_request_secret: str | None = None
     cloud_tasks_dispatch_deadline_seconds: int = 1800
+    cloud_tasks_create_timeout_seconds: int = 30
 
     temp_dir: Path = Field(default=Path("/tmp/reelvault"))
     max_video_size_mb: int = 100

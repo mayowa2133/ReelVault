@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import re
+
+from google.api_core.exceptions import AlreadyExists, DeadlineExceeded
 from google.cloud import tasks_v2
 from google.protobuf import duration_pb2
 
@@ -28,6 +31,7 @@ class CloudTasksQueueService:
         dispatch_deadline.FromSeconds(self.settings.cloud_tasks_dispatch_deadline_seconds)
 
         task = {
+            "name": cloud_task_name(parent, payload),
             "http_request": {
                 "http_method": tasks_v2.HttpMethod.POST,
                 "url": target_url,
@@ -39,7 +43,13 @@ class CloudTasksQueueService:
             },
             "dispatch_deadline": dispatch_deadline,
         }
-        response = self.client.create_task(request={"parent": parent, "task": task})
+        try:
+            response = self.client.create_task(
+                request={"parent": parent, "task": task},
+                timeout=self.settings.cloud_tasks_create_timeout_seconds,
+            )
+        except AlreadyExists:
+            return task["name"]
         return response.name
 
     def _queue_path(self) -> str:
@@ -69,3 +79,27 @@ class CloudTasksQueueService:
         if not self.settings.task_request_secret:
             raise ExternalServiceError("TASK_REQUEST_SECRET is required for Cloud Tasks", step="cloud_tasks")
         return self.settings.task_request_secret
+
+
+def cloud_task_name(parent: str, payload: ProcessingTaskPayload) -> str:
+    return f"{parent}/tasks/{cloud_task_id(payload)}"
+
+
+def cloud_task_id(payload: ProcessingTaskPayload) -> str:
+    shortcode = payload.reel.shortcode or "reel"
+    safe_shortcode = re.sub(r"[^A-Za-z0-9_-]+", "-", shortcode).strip("-")[:64] or "reel"
+    return f"reelvault-row-{payload.row_index}-{safe_shortcode}".lower()
+
+
+def is_uncertain_cloud_tasks_timeout(exc: Exception) -> bool:
+    if isinstance(exc, (DeadlineExceeded, TimeoutError)):
+        return True
+
+    message = str(exc).lower()
+    timeout_fragments = (
+        "deadline exceeded",
+        "read operation timed out",
+        "timed out",
+        "timeout",
+    )
+    return any(fragment in message for fragment in timeout_fragments)

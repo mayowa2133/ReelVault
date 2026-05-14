@@ -142,3 +142,34 @@ async def test_cloud_tasks_enqueue_failure_marks_row_failed(monkeypatch):
     assert fake_sheets.rows[10].status == ProcessingStatus.QUEUE_FAILED.value
     assert "queue unavailable" in fake_sheets.rows[10].error_message
     assert telegram.messages
+
+
+@pytest.mark.asyncio
+async def test_cloud_tasks_enqueue_timeout_keeps_row_queued(monkeypatch):
+    class TimeoutQueue(FakeQueue):
+        def enqueue_processing_task(self, payload):
+            raise TimeoutError("The read operation timed out")
+
+    fake_sheets = FakeSheets(None)
+    telegram = FakeTelegram()
+    monkeypatch.setattr("app.routes.telegram.GoogleSheetsService", lambda settings: fake_sheets)
+    monkeypatch.setattr("app.routes.telegram.CloudTasksQueueService", TimeoutQueue)
+    settings = Settings(
+        processing_backend="cloud_tasks",
+        gcp_project_id="project-123",
+        task_request_secret="secret",
+        cloud_tasks_target_url="https://example.run.app/tasks/process-reel",
+    )
+
+    queued = await schedule_reel_processing(
+        reel=ReelReference(url="https://www.instagram.com/reel/ABC123/", shortcode="ABC123"),
+        chat_id=123,
+        settings=settings,
+        background_tasks=BackgroundTasks(),
+        telegram=telegram,
+    )
+
+    assert queued is True
+    assert fake_sheets.rows[10].status == ProcessingStatus.QUEUED.value
+    assert not fake_sheets.rows[10].error_message
+    assert telegram.messages == []

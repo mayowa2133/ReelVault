@@ -5,7 +5,7 @@ from app.models.schemas import ContentPillar, ProcessingStatus, ProcessingTaskPa
 from app.services.google_sheets_service import GoogleSheetsService
 from app.services.instagram_service import InstagramService
 from app.services.pillar_service import PillarParseKind, PillarService
-from app.services.task_queue_service import CloudTasksQueueService
+from app.services.task_queue_service import CloudTasksQueueService, is_uncertain_cloud_tasks_timeout
 from app.services.telegram_service import TelegramService
 from app.services.workflow_service import process_reel_inspiration
 from app.utils.errors import public_error_message
@@ -302,30 +302,48 @@ async def enqueue_cloud_task(
             row_index = sheets.append_row(row)
         else:
             sheets.update_row(row_index, row)
-
-        task_payload = ProcessingTaskPayload(
-            reel=reel,
-            chat_id=chat_id,
-            row_index=row_index,
-            initial_pillar=initial_pillar,
-            initial_pillar_source=initial_pillar_source,
+    except Exception as exc:
+        error = public_error_message(exc)
+        logger.warning(
+            "cloud_task_row_save_failed",
+            extra={"shortcode": reel.shortcode, "row_index": row_index, "error": error},
         )
+        try:
+            await telegram.send_message_async(chat_id, f"I could not save this Reel before queueing it: {error}")
+        except Exception as send_exc:
+            logger.warning("telegram_row_save_failure_reply_failed", extra={"error": public_error_message(send_exc)})
+        return False
+
+    task_payload = ProcessingTaskPayload(
+        reel=reel,
+        chat_id=chat_id,
+        row_index=row_index,
+        initial_pillar=initial_pillar,
+        initial_pillar_source=initial_pillar_source,
+    )
+    try:
         CloudTasksQueueService(settings).enqueue_processing_task(task_payload)
         return True
     except Exception as exc:
         error = public_error_message(exc)
+        if is_uncertain_cloud_tasks_timeout(exc):
+            logger.warning(
+                "cloud_task_enqueue_confirmation_timed_out",
+                extra={"shortcode": reel.shortcode, "row_index": row_index, "error": error},
+            )
+            return True
+
         logger.warning(
             "cloud_task_enqueue_failed",
             extra={"shortcode": reel.shortcode, "row_index": row_index, "error": error},
         )
-        if row_index is not None:
-            try:
-                row = sheets.get_row(row_index)
-                row.status = ProcessingStatus.QUEUE_FAILED.value
-                row.append_error(f"Cloud Tasks enqueue failed: {error}")
-                sheets.update_row(row_index, row)
-            except Exception as sheet_exc:
-                logger.warning("queue_failed_row_update_failed", extra={"error": public_error_message(sheet_exc)})
+        try:
+            row = sheets.get_row(row_index)
+            row.status = ProcessingStatus.QUEUE_FAILED.value
+            row.append_error(f"Cloud Tasks enqueue failed: {error}")
+            sheets.update_row(row_index, row)
+        except Exception as sheet_exc:
+            logger.warning("queue_failed_row_update_failed", extra={"error": public_error_message(sheet_exc)})
         try:
             await telegram.send_message_async(chat_id, f"I saved the Reel URL, but could not queue processing: {error}")
         except Exception as send_exc:

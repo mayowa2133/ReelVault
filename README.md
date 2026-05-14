@@ -102,6 +102,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `CLOUD_TASKS_TARGET_URL` | Full Cloud Run task URL, usually `$BASE_URL/tasks/process-reel`. |
 | `TASK_REQUEST_SECRET` | Shared secret required by `/tasks/process-reel`. |
 | `CLOUD_TASKS_DISPATCH_DEADLINE_SECONDS` | Cloud Tasks timeout, defaults to `1800`. |
+| `CLOUD_TASKS_CREATE_TIMEOUT_SECONDS` | Timeout for creating a Cloud Task from the webhook, defaults to `30`. |
 | `TEMP_DIR` | Temporary processing directory. |
 | `MAX_VIDEO_SIZE_MB` | Maximum downloaded video size. |
 | `MAX_AUDIO_SIZE_MB` | Maximum audio chunk size sent to transcription. |
@@ -401,7 +402,7 @@ gcloud run deploy reelvault \
   --concurrency=1 \
   --min-instances=0 \
   --max-instances=2 \
-  --set-env-vars="PROCESSING_BACKEND=cloud_tasks,GCP_PROJECT_ID=$PROJECT_ID,GCP_LOCATION=$REGION,CLOUD_TASKS_QUEUE=$QUEUE,GOOGLE_DRIVE_FOLDER_ID=$GOOGLE_DRIVE_FOLDER_ID,GOOGLE_SHEET_ID=$GOOGLE_SHEET_ID,GOOGLE_SHEET_TAB_NAME=Reels,TEMP_DIR=/tmp/reelvault,ENABLE_VIDEO_DOWNLOAD=true,ENABLE_AUDIO_UPLOAD=true" \
+  --set-env-vars="PROCESSING_BACKEND=cloud_tasks,GCP_PROJECT_ID=$PROJECT_ID,GCP_LOCATION=$REGION,CLOUD_TASKS_QUEUE=$QUEUE,CLOUD_TASKS_CREATE_TIMEOUT_SECONDS=30,GOOGLE_DRIVE_FOLDER_ID=$GOOGLE_DRIVE_FOLDER_ID,GOOGLE_SHEET_ID=$GOOGLE_SHEET_ID,GOOGLE_SHEET_TAB_NAME=Reels,TEMP_DIR=/tmp/reelvault,ENABLE_VIDEO_DOWNLOAD=true,ENABLE_AUDIO_UPLOAD=true" \
   --set-secrets="TELEGRAM_BOT_TOKEN=telegram-bot-token:latest,TELEGRAM_WEBHOOK_SECRET=telegram-webhook-secret:latest,TASK_REQUEST_SECRET=task-request-secret:latest,OPENAI_API_KEY=openai-api-key:latest,GOOGLE_OAUTH_TOKEN_JSON=google-oauth-token-json:latest"
 ```
 
@@ -473,6 +474,7 @@ The included tests cover Instagram Reel URL extraction, Telegram pillar parsing/
 | Google OAuth token is invalid or missing Docs scope | Delete `secrets/token.json`, rerun `python scripts/google_oauth_setup.py`, and approve Drive, Docs, and Sheets scopes. |
 | Google Sheets append failed | Verify `GOOGLE_SHEET_ID`, `GOOGLE_SHEET_TAB_NAME`, and that the authorized Google account can edit the Sheet. |
 | Cloud Tasks enqueue failed | Verify `PROCESSING_BACKEND=cloud_tasks`, `GCP_PROJECT_ID`, queue name/location, Cloud Run service account permissions, `TASK_REQUEST_SECRET`, and `CLOUD_TASKS_TARGET_URL`. |
+| Cloud Tasks enqueue timed out but later processed | This can happen if Google Cloud accepts the task but the webhook request times out while waiting for confirmation. ReelVault now uses deterministic task names and treats duplicate task creation as success. |
 | `/tasks/process-reel` returns `401` | Check `TASK_REQUEST_SECRET` and make sure Cloud Tasks sends `X-ReelVault-Task-Secret`. |
 | Google Drive upload failed | Verify `GOOGLE_DRIVE_FOLDER_ID` and that the authorized Google account can create files in that folder. |
 | Google Doc script creation failed | Enable the Google Docs API, rerun OAuth setup for the Docs scope, and verify the authorized account can create files in the Drive folder. |
