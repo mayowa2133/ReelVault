@@ -26,5 +26,6 @@ def process_reel_task(
         payload.initial_pillar,
         payload.initial_pillar_source,
         payload.row_index,
+        payload.telegram_media,
     )
     return {"ok": True, "row_index": payload.row_index, "message": "Processed"}

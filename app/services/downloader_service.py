@@ -30,22 +30,7 @@ class DownloaderService:
 
         output_dir.mkdir(parents=True, exist_ok=True)
         output_template = str(output_dir / "%(id)s.%(ext)s")
-        options = {
-            "outtmpl": output_template,
-            "format": "best[ext=mp4]/bestvideo+bestaudio/best",
-            "merge_output_format": "mp4",
-            "noplaylist": True,
-            "quiet": True,
-            "no_warnings": True,
-            "retries": 1,
-            "socket_timeout": 30,
-            "http_headers": {
-                "User-Agent": (
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-                )
-            },
-        }
+        options = self._yt_dlp_options(output_template, output_dir)
 
         try:
             with yt_dlp.YoutubeDL(options) as ydl:
@@ -84,6 +69,43 @@ class DownloaderService:
             title=safe_str(info.get("title")),
             metadata=metadata,
         )
+
+    def _yt_dlp_options(self, output_template: str, output_dir: Path) -> dict[str, Any]:
+        options: dict[str, Any] = {
+            "outtmpl": output_template,
+            "format": "best[ext=mp4]/bestvideo+bestaudio/best",
+            "merge_output_format": "mp4",
+            "noplaylist": True,
+            "quiet": True,
+            "no_warnings": True,
+            "retries": 1,
+            "socket_timeout": 30,
+            "http_headers": {
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+                )
+            },
+        }
+
+        cookie_file = self._cookie_file(output_dir)
+        if cookie_file:
+            options["cookiefile"] = str(cookie_file)
+        return options
+
+    def _cookie_file(self, output_dir: Path) -> Path | None:
+        if self.settings.instagram_cookies_text:
+            cookie_file = output_dir / "instagram_cookies.txt"
+            cookie_file.write_text(self.settings.instagram_cookies_text, encoding="utf-8")
+            cookie_file.chmod(0o600)
+            return cookie_file
+
+        if self.settings.instagram_cookies_file:
+            cookie_file = Path(self.settings.instagram_cookies_file)
+            if cookie_file.exists():
+                return cookie_file
+            logger.warning("instagram_cookies_file_missing", extra={"path": str(cookie_file)})
+        return None
 
 
 def resolve_downloaded_path(info: dict[str, Any], output_dir: Path, ydl: Any) -> Path | None:
@@ -132,4 +154,3 @@ def safe_str(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
-

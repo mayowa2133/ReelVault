@@ -108,6 +108,11 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `MAX_AUDIO_SIZE_MB` | Maximum audio chunk size sent to transcription. |
 | `ENABLE_VIDEO_DOWNLOAD` | Set `false` to save URLs without downloading. |
 | `ENABLE_AUDIO_UPLOAD` | Set `false` to avoid uploading extracted audio. |
+| `ENABLE_TELEGRAM_MEDIA_FALLBACK` | Allows uploading a video directly to Telegram when Instagram blocks download. |
+| `TELEGRAM_MEDIA_MAX_SIZE_MB` | Maximum Telegram-uploaded media size accepted by ReelVault. |
+| `TELEGRAM_MEDIA_DOWNLOAD_TIMEOUT_SECONDS` | Timeout for downloading uploaded Telegram media inside the worker. |
+| `INSTAGRAM_COOKIES_FILE` | Optional path to a Netscape-format Instagram `cookies.txt` file for `yt-dlp`. |
+| `INSTAGRAM_COOKIES_TEXT` | Optional full contents of Instagram `cookies.txt`, useful as a Cloud Run Secret Manager value. |
 | `ENABLE_DEBUG_LOGGING` | Enables verbose structured JSON logs. |
 
 ## Telegram Bot Setup
@@ -257,6 +262,38 @@ For each fully transcribed Reel, ReelVault generates:
 
 Drive files are organized by pillar and then by inspiration. ReelVault creates subfolders inside `GOOGLE_DRIVE_FOLDER_ID` named `Gym`, `Tech`, `Motivation`, `Morning Routine`, `Job Search`, and `Faith` as needed. After analysis, it creates a titled folder inside the matching pillar folder using the generated script title plus the Reel shortcode, then moves the video/audio into that folder and creates the script Google Doc there. The folder link is saved in the `Inspiration Folder Link` column.
 
+## Instagram Cookies
+
+Cloud Run uses Google datacenter IPs, so Instagram may block anonymous downloads more often than local Docker. To improve download success, export Instagram cookies in Netscape `cookies.txt` format from a browser session you control and keep the file private.
+
+Local Docker options:
+
+1. Save the file as `secrets/instagram-cookies.txt`.
+2. Set `INSTAGRAM_COOKIES_FILE=/secrets/instagram-cookies.txt`.
+3. Mount it into Docker:
+
+```yaml
+- ./secrets/instagram-cookies.txt:/secrets/instagram-cookies.txt:ro
+```
+
+Cloud Run option:
+
+1. Create a Secret Manager secret named `instagram-cookies-text`.
+2. Paste the full contents of `cookies.txt` as the secret value.
+3. Add it to Cloud Run as an environment secret: `INSTAGRAM_COOKIES_TEXT=instagram-cookies-text:latest`.
+
+Cookies expire and can be revoked by Instagram. Refresh this secret when downloads start failing with login or rate-limit messages again. Do not commit cookies to Git.
+
+## Telegram Upload Fallback
+
+If Instagram blocks Cloud Run, send the video file directly to the bot. Use a caption when possible:
+
+```text
+tech https://www.instagram.com/reel/SHORTCODE/
+```
+
+The bot will save the upload, transcribe it, analyze it, create the script doc, organize files in Drive, and update Sheets. If no Instagram URL is included in the caption, ReelVault uses a `telegram-upload://...` source reference.
+
 ## OpenAI Setup
 
 1. Create an OpenAI API key.
@@ -378,7 +415,7 @@ gcloud tasks queues create "$QUEUE" \
   --max-attempts=2
 ```
 
-Create Secret Manager values. `google-oauth-token-json` should contain the full contents of your local `secrets/token.json`.
+Create Secret Manager values. `google-oauth-token-json` should contain the full contents of your local `secrets/token.json`. The `instagram-cookies-text` secret is optional; create it only if you are using Instagram cookies, and omit `INSTAGRAM_COOKIES_TEXT=instagram-cookies-text:latest` from deploy commands if you skip it.
 
 ```bash
 printf "%s" "$TELEGRAM_BOT_TOKEN" | gcloud secrets create telegram-bot-token --data-file=-
@@ -386,6 +423,8 @@ printf "%s" "$TELEGRAM_WEBHOOK_SECRET" | gcloud secrets create telegram-webhook-
 printf "%s" "$TASK_REQUEST_SECRET" | gcloud secrets create task-request-secret --data-file=-
 printf "%s" "$OPENAI_API_KEY" | gcloud secrets create openai-api-key --data-file=-
 gcloud secrets create google-oauth-token-json --data-file=secrets/token.json
+# Optional, only when using Instagram cookies.
+gcloud secrets create instagram-cookies-text --data-file=secrets/instagram-cookies.txt
 ```
 
 Deploy the first revision. After it prints a service URL, redeploy once with `BASE_URL` and `CLOUD_TASKS_TARGET_URL` set to that URL.
@@ -402,8 +441,8 @@ gcloud run deploy reelvault \
   --concurrency=1 \
   --min-instances=0 \
   --max-instances=2 \
-  --set-env-vars="PROCESSING_BACKEND=cloud_tasks,GCP_PROJECT_ID=$PROJECT_ID,GCP_LOCATION=$REGION,CLOUD_TASKS_QUEUE=$QUEUE,CLOUD_TASKS_CREATE_TIMEOUT_SECONDS=30,GOOGLE_DRIVE_FOLDER_ID=$GOOGLE_DRIVE_FOLDER_ID,GOOGLE_SHEET_ID=$GOOGLE_SHEET_ID,GOOGLE_SHEET_TAB_NAME=Reels,TEMP_DIR=/tmp/reelvault,ENABLE_VIDEO_DOWNLOAD=true,ENABLE_AUDIO_UPLOAD=true" \
-  --set-secrets="TELEGRAM_BOT_TOKEN=telegram-bot-token:latest,TELEGRAM_WEBHOOK_SECRET=telegram-webhook-secret:latest,TASK_REQUEST_SECRET=task-request-secret:latest,OPENAI_API_KEY=openai-api-key:latest,GOOGLE_OAUTH_TOKEN_JSON=google-oauth-token-json:latest"
+  --set-env-vars="PROCESSING_BACKEND=cloud_tasks,GCP_PROJECT_ID=$PROJECT_ID,GCP_LOCATION=$REGION,CLOUD_TASKS_QUEUE=$QUEUE,CLOUD_TASKS_CREATE_TIMEOUT_SECONDS=30,GOOGLE_DRIVE_FOLDER_ID=$GOOGLE_DRIVE_FOLDER_ID,GOOGLE_SHEET_ID=$GOOGLE_SHEET_ID,GOOGLE_SHEET_TAB_NAME=Reels,TEMP_DIR=/tmp/reelvault,ENABLE_VIDEO_DOWNLOAD=true,ENABLE_AUDIO_UPLOAD=true,ENABLE_TELEGRAM_MEDIA_FALLBACK=true,TELEGRAM_MEDIA_MAX_SIZE_MB=100,TELEGRAM_MEDIA_DOWNLOAD_TIMEOUT_SECONDS=300" \
+  --set-secrets="TELEGRAM_BOT_TOKEN=telegram-bot-token:latest,TELEGRAM_WEBHOOK_SECRET=telegram-webhook-secret:latest,TASK_REQUEST_SECRET=task-request-secret:latest,OPENAI_API_KEY=openai-api-key:latest,GOOGLE_OAUTH_TOKEN_JSON=google-oauth-token-json:latest,INSTAGRAM_COOKIES_TEXT=instagram-cookies-text:latest"
 ```
 
 Set the final Cloud Run URL and redeploy:
@@ -481,6 +520,8 @@ The included tests cover Instagram Reel URL extraction, Telegram pillar parsing/
 | `FFmpeg is not installed` | Use Docker or install FFmpeg locally and make sure `ffmpeg` is on `PATH`. |
 | OpenAI transcription failed | Check `OPENAI_API_KEY`, audio file size, and `OPENAI_TRANSCRIPTION_MODEL`. Lower `MAX_AUDIO_SIZE_MB` only if your model limit is smaller. |
 | Instagram download failed | This is expected for some links. The row will be saved for manual review. Try a fresh Reel URL or set `ENABLE_VIDEO_DOWNLOAD=false` if you only want URL tracking. |
+| Instagram works locally but fails on Cloud Run | Add `INSTAGRAM_COOKIES_TEXT` from a private `cookies.txt` export, or upload the video directly to Telegram with the Reel URL in the caption. |
+| Telegram upload fallback fails | Check `ENABLE_TELEGRAM_MEDIA_FALLBACK`, file size, and whether Telegram Bot API can provide the uploaded file. Try sending the media as a document if sending as video fails. |
 
 ## How the Workflow Handles Failures
 

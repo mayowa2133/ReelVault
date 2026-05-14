@@ -1,4 +1,4 @@
-from app.models.schemas import SHEET_COLUMNS, ProcessingStatus, ReelReference, SheetRow
+from app.models.schemas import SHEET_COLUMNS, ProcessingStatus, ReelReference, SheetRow, TelegramMediaReference
 from app.services.google_sheets_service import column_letter, last_data_row_from_key_values, merge_headers, pillar_tab_name
 
 
@@ -49,6 +49,26 @@ def test_sheet_row_can_round_trip_from_values():
     assert parsed.pillar_source == "telegram_exact"
     assert parsed.custom_script == "Line one.\nLine two."
     assert parsed.used == "FALSE"
+
+
+def test_sheet_row_can_store_telegram_media_reference():
+    media = TelegramMediaReference(
+        file_id="file-123",
+        file_unique_id="unique-123",
+        file_name="upload.mp4",
+        mime_type="video/mp4",
+        file_size=1234,
+    )
+    row = SheetRow.from_telegram_media(
+        ReelReference(url="telegram-upload://unique-123", shortcode="unique-123"),
+        media,
+    )
+
+    parsed = SheetRow.from_values(row.to_values())
+
+    assert parsed.source_type == "telegram_upload"
+    assert parsed.telegram_file_id == "file-123"
+    assert parsed.to_telegram_media_reference() == media
 
 
 def test_column_letter_supports_dynamic_sheet_ranges():

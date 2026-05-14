@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     max_audio_size_mb: int = 24
     enable_video_download: bool = True
     enable_audio_upload: bool = True
+    enable_telegram_media_fallback: bool = True
+    telegram_media_max_size_mb: int = 100
+    telegram_media_download_timeout_seconds: int = 300
+    instagram_cookies_file: str | None = None
+    instagram_cookies_text: str | None = None
     enable_debug_logging: bool = False
 
     request_timeout_seconds: int = 30
@@ -59,6 +64,8 @@ class Settings(BaseSettings):
         "gcp_project_id",
         "cloud_tasks_target_url",
         "task_request_secret",
+        "instagram_cookies_file",
+        "instagram_cookies_text",
         mode="before",
     )
     @classmethod

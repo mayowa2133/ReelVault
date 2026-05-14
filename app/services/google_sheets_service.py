@@ -174,10 +174,9 @@ class GoogleSheetsService:
         ).execute()
 
         used_column = column_letter(used_column_index + 1)
-        inspiration_column = column_letter(SHEET_COLUMNS.index("Inspiration Folder Link") + 1)
         self._values().clear(
             spreadsheetId=self._sheet_id(),
-            range=f"{self._tab(tab_name)}!{used_column}{start_row}:{inspiration_column}{end_row}",
+            range=f"{self._tab(tab_name)}!{used_column}{start_row}:{last_sheet_column()}{end_row}",
         ).execute()
 
     def ensure_row_capacity(self, row_index: int, tab_name: str | None = None) -> None:

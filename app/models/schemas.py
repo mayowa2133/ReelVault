@@ -44,6 +44,15 @@ class ReelReference(BaseModel):
     is_share_url: bool = False
 
 
+class TelegramMediaReference(BaseModel):
+    file_id: str
+    file_unique_id: str | None = None
+    file_name: str | None = None
+    mime_type: str | None = None
+    file_size: int | None = None
+    media_type: str = "video"
+
+
 class DownloadResult(BaseModel):
     success: bool
     status: str
@@ -79,6 +88,7 @@ class ProcessingTaskPayload(BaseModel):
     row_index: int
     initial_pillar: ContentPillar | None = None
     initial_pillar_source: str = ""
+    telegram_media: TelegramMediaReference | None = None
 
 
 class OriginalContentIdea(BaseModel):
@@ -170,6 +180,12 @@ SHEET_FIELDS = [
     ("Script Google Doc Link", "script_google_doc_link"),
     ("Used", "used"),
     ("Inspiration Folder Link", "inspiration_folder_link"),
+    ("Source Type", "source_type"),
+    ("Telegram File ID", "telegram_file_id"),
+    ("Telegram File Unique ID", "telegram_file_unique_id"),
+    ("Telegram File Name", "telegram_file_name"),
+    ("Telegram MIME Type", "telegram_mime_type"),
+    ("Telegram File Size", "telegram_file_size"),
 ]
 
 SHEET_COLUMNS = [column for column, _field in SHEET_FIELDS]
@@ -224,10 +240,22 @@ class SheetRow(BaseModel):
     script_google_doc_link: str = ""
     used: str = "FALSE"
     inspiration_folder_link: str = ""
+    source_type: str = "instagram_url"
+    telegram_file_id: str = ""
+    telegram_file_unique_id: str = ""
+    telegram_file_name: str = ""
+    telegram_mime_type: str = ""
+    telegram_file_size: str = ""
 
     @classmethod
     def from_reel(cls, reel: ReelReference) -> "SheetRow":
         return cls(reel_url=reel.url, shortcode=reel.shortcode or "")
+
+    @classmethod
+    def from_telegram_media(cls, reel: ReelReference, media: TelegramMediaReference) -> "SheetRow":
+        row = cls.from_reel(reel)
+        row.apply_telegram_media(media)
+        return row
 
     @classmethod
     def from_values(cls, values: list[str]) -> "SheetRow":
@@ -267,6 +295,32 @@ class SheetRow(BaseModel):
         self.script_title = analysis.script_title
         self.re_hooks = "\n".join(analysis.re_hooks)
         self.custom_script = "\n".join(analysis.custom_script_lines)
+
+    def apply_telegram_media(self, media: TelegramMediaReference) -> None:
+        self.source_type = "telegram_upload"
+        self.telegram_file_id = media.file_id
+        self.telegram_file_unique_id = media.file_unique_id or ""
+        self.telegram_file_name = media.file_name or ""
+        self.telegram_mime_type = media.mime_type or ""
+        self.telegram_file_size = str(media.file_size) if media.file_size is not None else ""
+
+    def to_reel_reference(self) -> ReelReference:
+        return ReelReference(
+            url=self.reel_url,
+            shortcode=self.shortcode or None,
+            is_share_url="/share/reel/" in self.reel_url,
+        )
+
+    def to_telegram_media_reference(self) -> TelegramMediaReference | None:
+        if not self.telegram_file_id:
+            return None
+        return TelegramMediaReference(
+            file_id=self.telegram_file_id,
+            file_unique_id=self.telegram_file_unique_id or None,
+            file_name=self.telegram_file_name or None,
+            mime_type=self.telegram_mime_type or None,
+            file_size=int(self.telegram_file_size) if self.telegram_file_size.isdigit() else None,
+        )
 
     def append_error(self, message: str) -> None:
         clean_message = message.strip()

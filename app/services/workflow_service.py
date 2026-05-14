@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.config import Settings
-from app.models.schemas import ContentPillar, ProcessingStatus, ReelReference, SheetRow
+from app.models.schemas import ContentPillar, ProcessingStatus, ReelReference, SheetRow, TelegramMediaReference
 from app.services.analysis_service import AnalysisService
 from app.services.downloader_service import DownloaderService
 from app.services.file_service import FileService
@@ -25,6 +25,7 @@ def process_reel_inspiration(
     initial_pillar: ContentPillar | None = None,
     initial_pillar_source: str = "",
     existing_row_index: int | None = None,
+    telegram_media: TelegramMediaReference | None = None,
 ) -> None:
     """Run the full Reel processing workflow in a FastAPI background task."""
 
@@ -35,6 +36,8 @@ def process_reel_inspiration(
         row.pillar_confidence = "1.00"
     elif initial_pillar_source:
         row.pillar_source = initial_pillar_source
+    if telegram_media:
+        row.apply_telegram_media(telegram_media)
 
     telegram = TelegramService(settings)
     sheets = GoogleSheetsService(settings)
@@ -97,26 +100,42 @@ def process_reel_inspiration(
                     row.pillar = ""
                     row.pillar_source = initial_pillar_source
                     row.pillar_confidence = ""
+                if telegram_media:
+                    row.apply_telegram_media(telegram_media)
                 update_sheet()
         except Exception as exc:
             row.append_error(f"Google Sheets append failed: {public_error_message(exc)}")
             logger.warning("google_sheets_append_failed", extra={"error": public_error_message(exc)})
 
         mark(status=ProcessingStatus.DOWNLOAD_STARTED, download_status=ProcessingStatus.DOWNLOAD_STARTED)
-        download_result = downloader.download(reel.url, job_dir)
-        if download_result.creator_username:
-            row.creator = download_result.creator_username
+        if telegram_media:
+            try:
+                video_path = telegram.download_media_file(telegram_media, job_dir)
+                row.download_status = "telegram_upload_received"
+                update_sheet()
+            except Exception as exc:
+                mark(
+                    status=ProcessingStatus.PARTIAL_COMPLETE,
+                    download_status=ProcessingStatus.DOWNLOAD_FAILED,
+                    error=public_error_message(exc),
+                )
+                send_final_message(telegram, chat_id, row, sheets.sheet_url)
+                return
+        else:
+            download_result = downloader.download(reel.url, job_dir)
+            if download_result.creator_username:
+                row.creator = download_result.creator_username
 
-        if not download_result.success or not download_result.file_path:
-            mark(
-                status=ProcessingStatus.PARTIAL_COMPLETE,
-                download_status=ProcessingStatus.DOWNLOAD_FAILED,
-                error=download_result.error_message or "Download failed; manual review needed.",
-            )
-            send_final_message(telegram, chat_id, row, sheets.sheet_url)
-            return
+            if not download_result.success or not download_result.file_path:
+                mark(
+                    status=ProcessingStatus.PARTIAL_COMPLETE,
+                    download_status=ProcessingStatus.DOWNLOAD_FAILED,
+                    error=download_result.error_message or "Download failed; manual review needed.",
+                )
+                send_final_message(telegram, chat_id, row, sheets.sheet_url)
+                return
 
-        video_path = download_result.file_path
+            video_path = download_result.file_path
         mark(status=ProcessingStatus.DOWNLOAD_COMPLETE, download_status=ProcessingStatus.DOWNLOAD_COMPLETE)
 
         uploaded_video_file_id = upload_video_if_possible(drive, row, video_path, update_sheet)

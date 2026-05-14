@@ -2,13 +2,17 @@ import pytest
 from fastapi import BackgroundTasks
 
 from app.config import Settings
-from app.models.schemas import ContentPillar, ProcessingStatus, ReelReference, SheetRow
-from app.routes.telegram import schedule_reel_processing
+from app.models.schemas import ContentPillar, ProcessingStatus, ReelReference, SheetRow, TelegramMediaReference
+from app.routes.telegram import handle_media_upload, schedule_reel_processing
+from app.services.telegram_service import IncomingTelegramMedia
 
 
 class FakeTelegram:
     def __init__(self):
         self.messages = []
+
+    def is_allowed_user(self, _user_id: int) -> bool:
+        return True
 
     async def send_message_async(self, chat_id: int, text: str):
         self.messages.append((chat_id, text))
@@ -173,3 +177,66 @@ async def test_cloud_tasks_enqueue_timeout_keeps_row_queued(monkeypatch):
     assert fake_sheets.rows[10].status == ProcessingStatus.QUEUED.value
     assert not fake_sheets.rows[10].error_message
     assert telegram.messages == []
+
+
+@pytest.mark.asyncio
+async def test_cloud_tasks_backend_enqueues_telegram_media(monkeypatch):
+    fake_sheets = FakeSheets(None)
+    FakeQueue.payloads = []
+    monkeypatch.setattr("app.routes.telegram.GoogleSheetsService", lambda settings: fake_sheets)
+    monkeypatch.setattr("app.routes.telegram.CloudTasksQueueService", FakeQueue)
+    settings = Settings(
+        processing_backend="cloud_tasks",
+        gcp_project_id="project-123",
+        task_request_secret="secret",
+        cloud_tasks_target_url="https://example.run.app/tasks/process-reel",
+    )
+    media = TelegramMediaReference(file_id="file-123", file_unique_id="unique-123", file_name="upload.mp4")
+
+    queued = await schedule_reel_processing(
+        reel=ReelReference(url="telegram-upload://unique-123", shortcode="unique-123"),
+        chat_id=123,
+        settings=settings,
+        background_tasks=BackgroundTasks(),
+        telegram=FakeTelegram(),
+        telegram_media=media,
+    )
+
+    assert queued is True
+    assert fake_sheets.appended.source_type == "telegram_upload"
+    assert fake_sheets.appended.telegram_file_id == "file-123"
+    assert FakeQueue.payloads[0].telegram_media == media
+
+
+@pytest.mark.asyncio
+async def test_media_upload_with_caption_url_creates_row_and_enqueues(monkeypatch):
+    fake_sheets = FakeSheets(None)
+    FakeQueue.payloads = []
+    telegram = FakeTelegram()
+    monkeypatch.setattr("app.routes.telegram.GoogleSheetsService", lambda settings: fake_sheets)
+    monkeypatch.setattr("app.routes.telegram.CloudTasksQueueService", FakeQueue)
+    settings = Settings(
+        processing_backend="cloud_tasks",
+        gcp_project_id="project-123",
+        task_request_secret="secret",
+        cloud_tasks_target_url="https://example.run.app/tasks/process-reel",
+    )
+    media = TelegramMediaReference(file_id="file-123", file_unique_id="unique-123", file_name="upload.mp4")
+
+    result = await handle_media_upload(
+        IncomingTelegramMedia(
+            chat_id=123,
+            user_id=456,
+            media=media,
+            caption="tech https://www.instagram.com/reel/ABC123/",
+        ),
+        telegram,
+        BackgroundTasks(),
+        settings,
+    )
+
+    assert result["queued"] == 1
+    assert fake_sheets.appended.reel_url == "https://www.instagram.com/reel/ABC123/"
+    assert fake_sheets.appended.pillar == "Tech"
+    assert fake_sheets.appended.source_type == "telegram_upload"
+    assert FakeQueue.payloads[0].telegram_media == media

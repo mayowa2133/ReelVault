@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+import re
 from typing import Any
 
 import httpx
 
 from app.config import Settings
-from app.models.schemas import ContentPillar, SheetRow
+from app.models.schemas import ContentPillar, SheetRow, TelegramMediaReference
 from app.services.pillar_service import PillarService
 from app.utils.errors import TelegramSendError, public_error_message
 from app.utils.logging import get_logger
@@ -31,6 +33,15 @@ class IncomingTelegramCallback:
     message_id: int | None = None
 
 
+@dataclass(frozen=True)
+class IncomingTelegramMedia:
+    chat_id: int
+    user_id: int
+    media: TelegramMediaReference
+    caption: str = ""
+    message_id: int | None = None
+
+
 class TelegramService:
     """Small direct Telegram Bot API wrapper."""
 
@@ -52,6 +63,35 @@ class TelegramService:
             chat_id=int(chat["id"]),
             user_id=int(user["id"]),
             text=str(text),
+            message_id=message.get("message_id"),
+        )
+
+    def parse_media_upload(self, payload: dict[str, Any]) -> IncomingTelegramMedia | None:
+        message = payload.get("message") or payload.get("edited_message")
+        if not isinstance(message, dict):
+            return None
+
+        media_payload, media_type = self._extract_supported_media(message)
+        if media_payload is None:
+            return None
+
+        user = message.get("from") or {}
+        chat = message.get("chat") or {}
+        if "id" not in user or "id" not in chat:
+            return None
+
+        return IncomingTelegramMedia(
+            chat_id=int(chat["id"]),
+            user_id=int(user["id"]),
+            media=TelegramMediaReference(
+                file_id=str(media_payload["file_id"]),
+                file_unique_id=media_payload.get("file_unique_id"),
+                file_name=media_payload.get("file_name"),
+                mime_type=media_payload.get("mime_type"),
+                file_size=media_payload.get("file_size"),
+                media_type=media_type,
+            ),
+            caption=str(message.get("caption") or ""),
             message_id=message.get("message_id"),
         )
 
@@ -93,11 +133,47 @@ class TelegramService:
         token = self._token()
         payload = self._message_payload(chat_id, text, reply_markup)
         try:
-            with httpx.Client(timeout=self.settings.request_timeout_seconds) as client:
+            with httpx.Client(timeout=self.settings.telegram_media_download_timeout_seconds) as client:
                 response = client.post(f"https://api.telegram.org/bot{token}/sendMessage", json=payload)
             self._validate_response(response)
         except Exception as exc:
             raise TelegramSendError(f"Telegram send failed: {public_error_message(exc)}", step="telegram") from exc
+
+    def download_media_file(self, media: TelegramMediaReference, output_dir: Path) -> Path:
+        if media.file_size and media.file_size > self.settings.telegram_media_max_size_mb * 1024 * 1024:
+            raise TelegramSendError(
+                f"Telegram media exceeds TELEGRAM_MEDIA_MAX_SIZE_MB ({self.settings.telegram_media_max_size_mb} MB)",
+                step="telegram",
+            )
+
+        token = self._token()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            with httpx.Client(timeout=self.settings.request_timeout_seconds) as client:
+                file_response = client.post(
+                    f"https://api.telegram.org/bot{token}/getFile",
+                    json={"file_id": media.file_id},
+                )
+                self._validate_response(file_response)
+                file_path = file_response.json()["result"]["file_path"]
+
+                destination = output_dir / telegram_download_name(media, file_path)
+                with client.stream("GET", f"https://api.telegram.org/file/bot{token}/{file_path}") as response:
+                    response.raise_for_status()
+                    with destination.open("wb") as handle:
+                        for chunk in response.iter_bytes():
+                            handle.write(chunk)
+        except Exception as exc:
+            raise TelegramSendError(f"Telegram media download failed: {public_error_message(exc)}", step="telegram") from exc
+
+        size_mb = destination.stat().st_size / (1024 * 1024)
+        if size_mb > self.settings.max_video_size_mb:
+            destination.unlink(missing_ok=True)
+            raise TelegramSendError(
+                f"Uploaded media exceeded MAX_VIDEO_SIZE_MB ({size_mb:.1f} MB)",
+                step="telegram",
+            )
+        return destination
 
     async def answer_callback_query_async(self, callback_query_id: str, text: str = "") -> None:
         token = self._token()
@@ -238,3 +314,24 @@ class TelegramService:
         if len(text) <= 3900:
             return text
         return text[:3860] + "\n[truncated]"
+
+    def _extract_supported_media(self, message: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
+        video = message.get("video")
+        if isinstance(video, dict) and video.get("file_id"):
+            return video, "video"
+
+        document = message.get("document")
+        if isinstance(document, dict) and document.get("file_id"):
+            mime_type = str(document.get("mime_type") or "")
+            file_name = str(document.get("file_name") or "")
+            if mime_type.startswith("video/") or file_name.lower().endswith((".mp4", ".mov", ".m4v", ".webm")):
+                return document, "document_video"
+
+        return None, ""
+
+
+def telegram_download_name(media: TelegramMediaReference, telegram_file_path: str) -> str:
+    candidate = media.file_name or Path(telegram_file_path).name or f"{media.file_unique_id or 'telegram_upload'}.mp4"
+    candidate = re.sub(r"[\r\n\t]+", " ", candidate)
+    candidate = re.sub(r"[^A-Za-z0-9_. -]+", "_", candidate).strip(" ._")
+    return candidate or "telegram_upload.mp4"
