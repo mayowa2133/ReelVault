@@ -11,4 +11,7 @@ tmp/
 temp/
 downloads/
 secrets/
+cookies.txt
+instagram-cookies.txt
+*cookies*.txt
 *.log
