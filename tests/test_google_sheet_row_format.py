@@ -1,5 +1,12 @@
 from app.models.schemas import SHEET_COLUMNS, ProcessingStatus, ReelReference, SheetRow, TelegramMediaReference
-from app.services.google_sheets_service import column_letter, last_data_row_from_key_values, merge_headers, pillar_tab_name
+from app.services.google_sheets_service import (
+    column_letter,
+    last_data_row_from_key_values,
+    merge_headers,
+    pillar_tab_name,
+    sheet_row_matches_reference,
+    used_sync_updates,
+)
 
 
 def test_sheet_row_values_match_header_count_and_order():
@@ -113,3 +120,43 @@ def test_last_data_row_keeps_far_real_rows():
     ]
 
     assert last_data_row_from_key_values(values) == 4
+
+
+def test_sheet_row_matches_used_reference_by_folder_shortcode_or_url():
+    row = SheetRow(
+        reel_url="https://www.instagram.com/reel/ABC123/",
+        shortcode="ABC123",
+        inspiration_folder_link="https://drive.google.com/drive/folders/folder-id",
+    )
+
+    assert sheet_row_matches_reference(row, inspiration_folder_link="https://drive.google.com/drive/folders/folder-id")
+    assert sheet_row_matches_reference(row, shortcode="ABC123")
+    assert sheet_row_matches_reference(row, reel_url="https://www.instagram.com/reel/ABC123/")
+    assert not sheet_row_matches_reference(row, shortcode="OTHER")
+
+
+def test_used_sync_updates_matches_other_tabs_and_skips_edited_row():
+    matching_reels_row = SheetRow(
+        reel_url="https://www.instagram.com/reel/ABC123/",
+        shortcode="ABC123",
+        used="FALSE",
+        inspiration_folder_link="https://drive.google.com/drive/folders/folder-id",
+    )
+    matching_pillar_row = matching_reels_row.model_copy()
+    already_used_row = matching_reels_row.model_copy(update={"used": "TRUE"})
+    other_row = SheetRow(reel_url="https://www.instagram.com/reel/XYZ/", shortcode="XYZ", used="FALSE")
+
+    updates = used_sync_updates(
+        {
+            "Reels": [(2, matching_reels_row), (3, other_row)],
+            "Motivation": [(5, matching_pillar_row), (6, already_used_row)],
+        },
+        used=True,
+        inspiration_folder_link="https://drive.google.com/drive/folders/folder-id",
+        shortcode="ABC123",
+        reel_url="https://www.instagram.com/reel/ABC123/",
+        edited_tab_name="Reels",
+        edited_row_number=2,
+    )
+
+    assert updates == [("Motivation", 5)]

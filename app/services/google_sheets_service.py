@@ -6,6 +6,7 @@ from googleapiclient.discovery import build
 
 from app.config import Settings
 from app.models.schemas import ContentPillar, SHEET_COLUMNS, SheetRow
+from app.services.google_drive_service import extract_drive_folder_id_from_link
 from app.services.google_oauth_service import GOOGLE_SHEETS_SCOPE, GoogleOAuthCredentialsProvider
 from app.utils.errors import ExternalServiceError
 
@@ -31,6 +32,73 @@ class GoogleSheetsService:
 
     def update_row(self, row_index: int, row: SheetRow) -> None:
         self._update_row(row_index, row)
+
+    def sync_used_value(
+        self,
+        *,
+        used: bool,
+        pillar: str,
+        inspiration_folder_link: str = "",
+        shortcode: str = "",
+        reel_url: str = "",
+        edited_tab_name: str = "",
+        edited_row_number: int | None = None,
+    ) -> int:
+        tabs = unique_tab_names([self._tab_name(), pillar_tab_name(pillar) if pillar else ""])
+        rows_by_tab: dict[str, list[tuple[int, SheetRow]]] = {}
+        for tab_name in tabs:
+            if not self.tab_exists(tab_name):
+                continue
+            rows_by_tab[tab_name] = self.iter_rows(tab_name)
+
+        updates = used_sync_updates(
+            rows_by_tab,
+            used=used,
+            inspiration_folder_link=inspiration_folder_link,
+            shortcode=shortcode,
+            reel_url=reel_url,
+            edited_tab_name=edited_tab_name,
+            edited_row_number=edited_row_number,
+        )
+        for tab_name, row_index in updates:
+            self.update_used_cell(tab_name, row_index, used)
+        return len(updates)
+
+    def iter_rows(self, tab_name: str | None = None) -> list[tuple[int, SheetRow]]:
+        values = (
+            self._values()
+            .get(
+                spreadsheetId=self._sheet_id(),
+                range=f"{self._tab(tab_name)}!A2:{last_sheet_column()}",
+            )
+            .execute()
+            .get("values", [])
+        )
+        rows: list[tuple[int, SheetRow]] = []
+        for offset, values_row in enumerate(values, start=2):
+            try:
+                rows.append((offset, SheetRow.from_values(values_row)))
+            except ValueError:
+                continue
+        return rows
+
+    def update_used_cell(self, tab_name: str, row_index: int, used: bool) -> None:
+        used_column = column_letter(SHEET_COLUMNS.index("Used") + 1)
+        self._values().update(
+            spreadsheetId=self._sheet_id(),
+            range=f"{self._tab(tab_name)}!{used_column}{row_index}",
+            valueInputOption="USER_ENTERED",
+            body={"values": [["TRUE" if used else "FALSE"]]},
+        ).execute()
+
+    def tab_exists(self, tab_name: str) -> bool:
+        spreadsheet = (
+            self._client()
+            .spreadsheets()
+            .get(spreadsheetId=self._sheet_id(), fields="sheets/properties/title")
+            .execute()
+        )
+        return tab_name in {sheet["properties"]["title"] for sheet in spreadsheet.get("sheets", [])}
 
     def _update_row(self, row_index: int, row: SheetRow, tab_name: str | None = None) -> None:
         if row_index <= 0:
@@ -307,3 +375,70 @@ def last_data_row_from_key_values(values: list[list[str]]) -> int:
 def pillar_tab_name(pillar: ContentPillar | str) -> str:
     value = pillar.value if isinstance(pillar, ContentPillar) else str(pillar)
     return value.strip() or "Unclassified"
+
+
+def unique_tab_names(tab_names: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for tab_name in tab_names:
+        tab_name = str(tab_name or "").strip()
+        if not tab_name or tab_name in seen:
+            continue
+        seen.add(tab_name)
+        unique.append(tab_name)
+    return unique
+
+
+def normalize_used_value(value: bool | str) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().upper() == "TRUE"
+
+
+def used_sync_updates(
+    rows_by_tab: dict[str, list[tuple[int, SheetRow]]],
+    *,
+    used: bool,
+    inspiration_folder_link: str = "",
+    shortcode: str = "",
+    reel_url: str = "",
+    edited_tab_name: str = "",
+    edited_row_number: int | None = None,
+) -> list[tuple[str, int]]:
+    updates: list[tuple[str, int]] = []
+    for tab_name, rows in rows_by_tab.items():
+        for row_index, row in rows:
+            if tab_name == edited_tab_name and row_index == edited_row_number:
+                continue
+            if not sheet_row_matches_reference(
+                row,
+                inspiration_folder_link=inspiration_folder_link,
+                shortcode=shortcode,
+                reel_url=reel_url,
+            ):
+                continue
+            if normalize_used_value(row.used) == used:
+                continue
+            updates.append((tab_name, row_index))
+    return updates
+
+
+def sheet_row_matches_reference(
+    row: SheetRow,
+    *,
+    inspiration_folder_link: str = "",
+    shortcode: str = "",
+    reel_url: str = "",
+) -> bool:
+    wanted_folder_id = extract_drive_folder_id_from_link(inspiration_folder_link)
+    row_folder_id = extract_drive_folder_id_from_link(row.inspiration_folder_link)
+    if wanted_folder_id and row_folder_id and wanted_folder_id == row_folder_id:
+        return True
+
+    if shortcode and row.shortcode and shortcode == row.shortcode:
+        return True
+
+    if reel_url and row.reel_url and reel_url == row.reel_url:
+        return True
+
+    return False

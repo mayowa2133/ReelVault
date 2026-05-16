@@ -4,6 +4,7 @@ import mimetypes
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -74,6 +75,10 @@ class GoogleDriveService:
 
         folder_name = pillar_folder_name(pillar)
         return self.get_or_create_child_folder(self.settings.google_drive_folder_id, folder_name).folder_id
+
+    def get_or_create_used_folder(self, pillar: ContentPillar | str) -> DriveFolderResult:
+        pillar_folder_id = self.get_or_create_pillar_folder(pillar)
+        return self.get_or_create_child_folder(pillar_folder_id, self.settings.used_folder_name)
 
     def get_or_create_inspiration_folder(
         self,
@@ -146,12 +151,15 @@ class GoogleDriveService:
         return {pillar.value: self.get_or_create_pillar_folder(pillar) for pillar in ContentPillar}
 
     def move_file_to_folder(self, file_id: str, folder_id: str) -> None:
-        if not file_id or not folder_id:
+        self.move_item_to_folder(file_id, folder_id)
+
+    def move_item_to_folder(self, item_id: str, folder_id: str) -> None:
+        if not item_id or not folder_id:
             return
         file = (
             self._client()
             .files()
-            .get(fileId=file_id, fields="parents", supportsAllDrives=True)
+            .get(fileId=item_id, fields="parents", supportsAllDrives=True)
             .execute()
         )
         parents = file.get("parents", [])
@@ -159,12 +167,22 @@ class GoogleDriveService:
             return
         previous_parents = ",".join(parent for parent in parents if parent != folder_id)
         self._client().files().update(
-            fileId=file_id,
+            fileId=item_id,
             addParents=folder_id,
             removeParents=previous_parents,
             fields="id,parents",
             supportsAllDrives=True,
         ).execute()
+
+    def move_inspiration_folder_to_used(self, folder_id: str, pillar: ContentPillar | str) -> DriveFolderResult:
+        used_folder = self.get_or_create_used_folder(pillar)
+        self.move_item_to_folder(folder_id, used_folder.folder_id)
+        return used_folder
+
+    def move_inspiration_folder_to_pillar(self, folder_id: str, pillar: ContentPillar | str) -> str:
+        pillar_folder_id = self.get_or_create_pillar_folder(pillar)
+        self.move_item_to_folder(folder_id, pillar_folder_id)
+        return pillar_folder_id
 
     def _client(self):
         if self._service is None:
@@ -195,6 +213,28 @@ def sanitize_drive_folder_name(value: str) -> str:
 
 def drive_folder_link(folder_id: str) -> str:
     return f"https://drive.google.com/drive/folders/{folder_id}"
+
+
+def extract_drive_folder_id_from_link(value: str) -> str | None:
+    value = str(value or "").strip()
+    if not value:
+        return None
+
+    parsed = urlsplit(value)
+    if parsed.scheme and parsed.netloc:
+        query_id = parse_qs(parsed.query).get("id")
+        if query_id and query_id[0]:
+            return query_id[0]
+        match = re.search(r"/folders/([A-Za-z0-9_-]+)", parsed.path)
+        if match:
+            return match.group(1)
+
+    if "/folders/" in value:
+        return value.split("/folders/", 1)[1].split("?", 1)[0].split("/", 1)[0] or None
+
+    if re.fullmatch(r"[A-Za-z0-9_-]+", value):
+        return value
+    return None
 
 
 def escape_drive_query_value(value: str) -> str:

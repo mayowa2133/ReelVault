@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     google_drive_folder_id: str | None = None
     google_sheet_id: str | None = None
     google_sheet_tab_name: str = "Reels"
+    sheets_webhook_secret: str | None = None
+    used_folder_name: str = "Used"
 
     gcp_project_id: str | None = None
     gcp_location: str = "us-central1"
@@ -61,6 +63,7 @@ class Settings(BaseSettings):
         "google_oauth_token_json",
         "google_drive_folder_id",
         "google_sheet_id",
+        "sheets_webhook_secret",
         "gcp_project_id",
         "cloud_tasks_target_url",
         "task_request_secret",

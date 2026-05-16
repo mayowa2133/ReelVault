@@ -91,6 +91,18 @@ class ProcessingTaskPayload(BaseModel):
     telegram_media: TelegramMediaReference | None = None
 
 
+class SheetUsedWebhookPayload(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    sheet_name: str = Field(alias="sheetName")
+    row_number: int = Field(alias="rowNumber", ge=2)
+    used: bool
+    pillar: str = ""
+    shortcode: str = ""
+    reel_url: str = Field(default="", alias="reelUrl")
+    inspiration_folder_link: str = Field(default="", alias="inspirationFolderLink")
+
+
 class OriginalContentIdea(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

@@ -96,6 +96,8 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `GOOGLE_DRIVE_FOLDER_ID` | Destination Drive folder ID. |
 | `GOOGLE_SHEET_ID` | Destination Google Sheet ID. |
 | `GOOGLE_SHEET_TAB_NAME` | Sheet tab name, defaults to `Reels`. |
+| `SHEETS_WEBHOOK_SECRET` | Shared secret required by `/webhook/sheets/used` for Used checkbox automation. |
+| `USED_FOLDER_NAME` | Name of the archive folder created inside each pillar folder, defaults to `Used`. |
 | `GCP_PROJECT_ID` | Google Cloud project ID for Cloud Tasks. |
 | `GCP_LOCATION` | Cloud Tasks location, defaults to `us-central1`. |
 | `CLOUD_TASKS_QUEUE` | Cloud Tasks queue name, defaults to `reelvault-processing`. |
@@ -216,12 +218,14 @@ Transcript, Hook, Summary, Main Idea, Content Structure, Why It Works,
 Target Audience, Tone, Original Idea 1, Original Idea 2, Original Idea 3,
 Caption 1, Caption 2, Caption 3, Tags, Error Message, Pillar,
 Pillar Source, Pillar Confidence, Script Title, Re-hooks, Custom Script,
-Script Google Doc Link, Used, Inspiration Folder Link
+Script Google Doc Link, Used, Inspiration Folder Link, Source Type,
+Telegram File ID, Telegram File Unique ID, Telegram File Name,
+Telegram MIME Type, Telegram File Size
 ```
 
 The app inserts one row when processing starts and updates that same row as each step completes.
 Existing Sheets are upgraded by appending new columns, so existing row data stays in place.
-The `Used` column is configured as a Google Sheets checkbox so you can mark ideas you already turned into content.
+The `Used` column is configured as a Google Sheets checkbox so you can mark ideas you already turned into content. With the optional Apps Script trigger installed, checking `Used` moves that inspiration folder into a pillar-level `Used` folder, such as `ReelVault/Motivation/Used`. Unchecking it moves the folder back into the active pillar folder.
 
 ReelVault keeps the configured tab, usually `Reels`, as the full archive. When a Reel has a pillar, the completed row is also copied into a matching pillar tab:
 
@@ -261,6 +265,39 @@ For each fully transcribed Reel, ReelVault generates:
 - A Google Doc script saved in the matching inspiration folder and linked from the Sheet.
 
 Drive files are organized by pillar and then by inspiration. ReelVault creates subfolders inside `GOOGLE_DRIVE_FOLDER_ID` named `Gym`, `Tech`, `Motivation`, `Morning Routine`, `Job Search`, and `Faith` as needed. After analysis, it creates a titled folder inside the matching pillar folder using the generated script title plus the Reel shortcode, then moves the video/audio into that folder and creates the script Google Doc there. The folder link is saved in the `Inspiration Folder Link` column.
+
+## Used Checkbox Folder Automation
+
+The backend exposes `POST /webhook/sheets/used` for Google Sheets checkbox edits. It is protected by `SHEETS_WEBHOOK_SECRET`; do not expose this secret in public docs or screenshots.
+
+Cloud Run setup:
+
+1. Create a Secret Manager secret named `sheets-webhook-secret` with a long random value.
+2. Add it to Cloud Run as `SHEETS_WEBHOOK_SECRET=sheets-webhook-secret:latest`.
+3. Add `USED_FOLDER_NAME=Used` as a normal environment variable.
+4. Redeploy Cloud Run.
+
+Google Sheets setup:
+
+1. Open the ReelVault Google Sheet.
+2. Go to **Extensions > Apps Script**.
+3. Paste the contents of `scripts/google_sheets_used_trigger.gs`.
+4. In `configureReelVaultUsedWebhook`, set:
+
+```javascript
+REELVAULT_BASE_URL: 'https://your-cloud-run-url'
+SHEETS_WEBHOOK_SECRET: 'your-sheets-webhook-secret'
+```
+
+5. Run `configureReelVaultUsedWebhook` once.
+6. Run `installReelVaultUsedTrigger` once and approve permissions.
+
+Smoke test:
+
+1. Check `Used` on a completed row with an `Inspiration Folder Link`.
+2. Confirm the folder moves to the matching pillar's `Used` folder.
+3. Confirm the matching row in the main `Reels` tab or pillar tab also updates.
+4. Uncheck `Used` and confirm the folder moves back to the active pillar folder.
 
 ## Instagram Cookies
 
@@ -421,6 +458,7 @@ Create Secret Manager values. `google-oauth-token-json` should contain the full 
 printf "%s" "$TELEGRAM_BOT_TOKEN" | gcloud secrets create telegram-bot-token --data-file=-
 printf "%s" "$TELEGRAM_WEBHOOK_SECRET" | gcloud secrets create telegram-webhook-secret --data-file=-
 printf "%s" "$TASK_REQUEST_SECRET" | gcloud secrets create task-request-secret --data-file=-
+printf "%s" "$SHEETS_WEBHOOK_SECRET" | gcloud secrets create sheets-webhook-secret --data-file=-
 printf "%s" "$OPENAI_API_KEY" | gcloud secrets create openai-api-key --data-file=-
 gcloud secrets create google-oauth-token-json --data-file=secrets/token.json
 # Optional, only when using Instagram cookies.
@@ -441,8 +479,8 @@ gcloud run deploy reelvault \
   --concurrency=1 \
   --min-instances=0 \
   --max-instances=2 \
-  --set-env-vars="PROCESSING_BACKEND=cloud_tasks,GCP_PROJECT_ID=$PROJECT_ID,GCP_LOCATION=$REGION,CLOUD_TASKS_QUEUE=$QUEUE,CLOUD_TASKS_CREATE_TIMEOUT_SECONDS=30,GOOGLE_DRIVE_FOLDER_ID=$GOOGLE_DRIVE_FOLDER_ID,GOOGLE_SHEET_ID=$GOOGLE_SHEET_ID,GOOGLE_SHEET_TAB_NAME=Reels,TEMP_DIR=/tmp/reelvault,ENABLE_VIDEO_DOWNLOAD=true,ENABLE_AUDIO_UPLOAD=true,ENABLE_TELEGRAM_MEDIA_FALLBACK=true,TELEGRAM_MEDIA_MAX_SIZE_MB=100,TELEGRAM_MEDIA_DOWNLOAD_TIMEOUT_SECONDS=300" \
-  --set-secrets="TELEGRAM_BOT_TOKEN=telegram-bot-token:latest,TELEGRAM_WEBHOOK_SECRET=telegram-webhook-secret:latest,TASK_REQUEST_SECRET=task-request-secret:latest,OPENAI_API_KEY=openai-api-key:latest,GOOGLE_OAUTH_TOKEN_JSON=google-oauth-token-json:latest,INSTAGRAM_COOKIES_TEXT=instagram-cookies-text:latest"
+  --set-env-vars="PROCESSING_BACKEND=cloud_tasks,GCP_PROJECT_ID=$PROJECT_ID,GCP_LOCATION=$REGION,CLOUD_TASKS_QUEUE=$QUEUE,CLOUD_TASKS_CREATE_TIMEOUT_SECONDS=30,GOOGLE_DRIVE_FOLDER_ID=$GOOGLE_DRIVE_FOLDER_ID,GOOGLE_SHEET_ID=$GOOGLE_SHEET_ID,GOOGLE_SHEET_TAB_NAME=Reels,USED_FOLDER_NAME=Used,TEMP_DIR=/tmp/reelvault,ENABLE_VIDEO_DOWNLOAD=true,ENABLE_AUDIO_UPLOAD=true,ENABLE_TELEGRAM_MEDIA_FALLBACK=true,TELEGRAM_MEDIA_MAX_SIZE_MB=100,TELEGRAM_MEDIA_DOWNLOAD_TIMEOUT_SECONDS=300" \
+  --set-secrets="TELEGRAM_BOT_TOKEN=telegram-bot-token:latest,TELEGRAM_WEBHOOK_SECRET=telegram-webhook-secret:latest,TASK_REQUEST_SECRET=task-request-secret:latest,SHEETS_WEBHOOK_SECRET=sheets-webhook-secret:latest,OPENAI_API_KEY=openai-api-key:latest,GOOGLE_OAUTH_TOKEN_JSON=google-oauth-token-json:latest,INSTAGRAM_COOKIES_TEXT=instagram-cookies-text:latest"
 ```
 
 Set the final Cloud Run URL and redeploy:
@@ -515,7 +553,9 @@ The included tests cover Instagram Reel URL extraction, Telegram pillar parsing/
 | Cloud Tasks enqueue failed | Verify `PROCESSING_BACKEND=cloud_tasks`, `GCP_PROJECT_ID`, queue name/location, Cloud Run service account permissions, `TASK_REQUEST_SECRET`, and `CLOUD_TASKS_TARGET_URL`. |
 | Cloud Tasks enqueue timed out but later processed | This can happen if Google Cloud accepts the task but the webhook request times out while waiting for confirmation. ReelVault now uses deterministic task names and treats duplicate task creation as success. |
 | `/tasks/process-reel` returns `401` | Check `TASK_REQUEST_SECRET` and make sure Cloud Tasks sends `X-ReelVault-Task-Secret`. |
+| `/webhook/sheets/used` returns `401` | Check `SHEETS_WEBHOOK_SECRET` in Cloud Run and the same value in Apps Script properties. |
 | Google Drive upload failed | Verify `GOOGLE_DRIVE_FOLDER_ID` and that the authorized Google account can create files in that folder. |
+| Used checkbox does not move folders | Confirm the Apps Script installable trigger is installed, the row has an `Inspiration Folder Link`, and the OAuth account can move Drive folders. |
 | Google Doc script creation failed | Enable the Google Docs API, rerun OAuth setup for the Docs scope, and verify the authorized account can create files in the Drive folder. |
 | `FFmpeg is not installed` | Use Docker or install FFmpeg locally and make sure `ffmpeg` is on `PATH`. |
 | OpenAI transcription failed | Check `OPENAI_API_KEY`, audio file size, and `OPENAI_TRANSCRIPTION_MODEL`. Lower `MAX_AUDIO_SIZE_MB` only if your model limit is smaller. |
