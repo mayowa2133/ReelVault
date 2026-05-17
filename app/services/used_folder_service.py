@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.config import Settings
-from app.models.schemas import SheetUsedWebhookPayload
+from app.models.schemas import SheetUsedWebhookPayload, utc_now_iso
 from app.services.google_drive_service import GoogleDriveService, extract_drive_folder_id_from_link
 from app.services.google_sheets_service import GoogleSheetsService
 from app.utils.logging import get_logger
@@ -35,6 +35,7 @@ class UsedFolderService:
 
     def handle_used_change(self, payload: SheetUsedWebhookPayload) -> UsedFolderResult:
         folder_id = extract_drive_folder_id_from_link(payload.inspiration_folder_link)
+        used_at = (payload.used_at or utc_now_iso()) if payload.used else ""
 
         if folder_id and payload.pillar:
             if payload.used:
@@ -59,6 +60,7 @@ class UsedFolderService:
             message = "Skipped Drive move because the row has no Inspiration Folder Link."
             moved = False
 
+        self.sheets.update_used_state(payload.sheet_name, payload.row_number, payload.used, used_at=used_at)
         synced_rows = self.sheets.sync_used_value(
             used=payload.used,
             pillar=payload.pillar,
@@ -67,7 +69,9 @@ class UsedFolderService:
             reel_url=payload.reel_url,
             edited_tab_name=payload.sheet_name,
             edited_row_number=payload.row_number,
+            used_at=used_at,
         )
+        self.sheets.sort_tabs_for_usage(payload.pillar)
 
         return UsedFolderResult(
             moved=moved,

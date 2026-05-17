@@ -119,7 +119,7 @@ def process_reel_inspiration(
                     download_status=ProcessingStatus.DOWNLOAD_FAILED,
                     error=public_error_message(exc),
                 )
-                send_final_message(telegram, chat_id, row, sheets.sheet_url)
+                finalize_and_send(telegram, chat_id, row, sheets)
                 return
         else:
             download_result = downloader.download(reel.url, job_dir)
@@ -132,7 +132,7 @@ def process_reel_inspiration(
                     download_status=ProcessingStatus.DOWNLOAD_FAILED,
                     error=download_result.error_message or "Download failed; manual review needed.",
                 )
-                send_final_message(telegram, chat_id, row, sheets.sheet_url)
+                finalize_and_send(telegram, chat_id, row, sheets)
                 return
 
             video_path = download_result.file_path
@@ -148,7 +148,7 @@ def process_reel_inspiration(
                 transcription_status=ProcessingStatus.TRANSCRIPTION_FAILED,
                 error=f"Audio extraction failed: {public_error_message(exc)}",
             )
-            send_final_message(telegram, chat_id, row, sheets.sheet_url)
+            finalize_and_send(telegram, chat_id, row, sheets)
             return
 
         uploaded_audio_file_ids = upload_audio_if_possible(settings, drive, row, audio_files, update_sheet)
@@ -170,7 +170,7 @@ def process_reel_inspiration(
                 transcription_status=ProcessingStatus.TRANSCRIPTION_FAILED,
                 error=public_error_message(exc),
             )
-            send_final_message(telegram, chat_id, row, sheets.sheet_url)
+            finalize_and_send(telegram, chat_id, row, sheets)
             return
 
         mark(status=ProcessingStatus.ANALYSIS_STARTED, analysis_status=ProcessingStatus.ANALYSIS_STARTED)
@@ -197,13 +197,13 @@ def process_reel_inspiration(
                 error=public_error_message(exc),
             )
 
-        send_final_message(telegram, chat_id, row, sheets.sheet_url)
+        finalize_and_send(telegram, chat_id, row, sheets)
     except Exception as exc:
         row.append_error(public_error_message(exc))
         row.status = ProcessingStatus.PARTIAL_COMPLETE.value
         update_sheet()
         logger.exception("reel_workflow_failed", extra={"shortcode": reel.shortcode, "error": public_error_message(exc)})
-        send_final_message(telegram, chat_id, row, sheets.sheet_url)
+        finalize_and_send(telegram, chat_id, row, sheets)
     finally:
         files.cleanup_dir(job_dir)
 
@@ -345,6 +345,21 @@ def append_pillar_sheet_row_if_possible(
         row.status = ProcessingStatus.PARTIAL_COMPLETE.value
         row.append_error(f"Google Sheets pillar tab update failed: {public_error_message(exc)}")
         update_sheet()
+
+
+def finalize_and_send(telegram: TelegramService, chat_id: int, row: SheetRow, sheets: GoogleSheetsService) -> None:
+    sort_sheet_tabs_if_possible(sheets, row)
+    send_final_message(telegram, chat_id, row, sheets.sheet_url)
+
+
+def sort_sheet_tabs_if_possible(sheets: GoogleSheetsService, row: SheetRow) -> None:
+    try:
+        results = sheets.sort_tabs_for_usage(row.pillar)
+        skipped_tabs = [tab_name for tab_name, sorted_ok in results.items() if not sorted_ok]
+        if skipped_tabs:
+            logger.info("google_sheets_sort_skipped_active_rows", extra={"tabs": skipped_tabs})
+    except Exception as exc:
+        logger.warning("google_sheets_sort_failed", extra={"error": public_error_message(exc)})
 
 
 def send_final_message(telegram: TelegramService, chat_id: int, row: SheetRow, sheet_url: str | None) -> None:

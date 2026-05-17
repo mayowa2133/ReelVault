@@ -51,6 +51,7 @@ function reelVaultUsedOnEdit(e) {
     sheetName: sheet.getName(),
     rowNumber: range.getRow(),
     used: range.getValue() === true || String(range.getValue()).toUpperCase() === 'TRUE',
+    usedAt: valueForHeader(headers, rowValues, 'Used At'),
     pillar: valueForHeader(headers, rowValues, 'Pillar'),
     shortcode: valueForHeader(headers, rowValues, 'Shortcode'),
     reelUrl: valueForHeader(headers, rowValues, 'Reel URL'),

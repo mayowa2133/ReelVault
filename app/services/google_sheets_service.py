@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import re
 
 from googleapiclient.discovery import build
 
 from app.config import Settings
-from app.models.schemas import ContentPillar, SHEET_COLUMNS, SheetRow
+from app.models.schemas import ContentPillar, ProcessingStatus, SHEET_COLUMNS, SheetRow, utc_now_iso
 from app.services.google_drive_service import extract_drive_folder_id_from_link
 from app.services.google_oauth_service import GOOGLE_SHEETS_SCOPE, GoogleOAuthCredentialsProvider
 from app.utils.errors import ExternalServiceError
@@ -43,7 +44,9 @@ class GoogleSheetsService:
         reel_url: str = "",
         edited_tab_name: str = "",
         edited_row_number: int | None = None,
+        used_at: str = "",
     ) -> int:
+        used_at = (used_at or utc_now_iso()) if used else ""
         tabs = unique_tab_names([self._tab_name(), pillar_tab_name(pillar) if pillar else ""])
         rows_by_tab: dict[str, list[tuple[int, SheetRow]]] = {}
         for tab_name in tabs:
@@ -59,9 +62,10 @@ class GoogleSheetsService:
             reel_url=reel_url,
             edited_tab_name=edited_tab_name,
             edited_row_number=edited_row_number,
+            used_at=used_at,
         )
         for tab_name, row_index in updates:
-            self.update_used_cell(tab_name, row_index, used)
+            self.update_used_state(tab_name, row_index, used, used_at=used_at)
         return len(updates)
 
     def iter_rows(self, tab_name: str | None = None) -> list[tuple[int, SheetRow]]:
@@ -82,14 +86,55 @@ class GoogleSheetsService:
                 continue
         return rows
 
-    def update_used_cell(self, tab_name: str, row_index: int, used: bool) -> None:
+    def update_used_state(self, tab_name: str, row_index: int, used: bool, used_at: str = "") -> None:
+        used_at = (used_at or utc_now_iso()) if used else ""
         used_column = column_letter(SHEET_COLUMNS.index("Used") + 1)
+        used_at_column = column_letter(SHEET_COLUMNS.index("Used At") + 1)
         self._values().update(
             spreadsheetId=self._sheet_id(),
             range=f"{self._tab(tab_name)}!{used_column}{row_index}",
             valueInputOption="USER_ENTERED",
             body={"values": [["TRUE" if used else "FALSE"]]},
         ).execute()
+        self._values().update(
+            spreadsheetId=self._sheet_id(),
+            range=f"{self._tab(tab_name)}!{used_at_column}{row_index}",
+            valueInputOption="USER_ENTERED",
+            body={"values": [[used_at]]},
+        ).execute()
+
+    def sort_tabs_for_usage(self, pillar: str = "") -> dict[str, bool]:
+        tabs = unique_tab_names([self._tab_name(), pillar_tab_name(pillar) if pillar else ""])
+        results: dict[str, bool] = {}
+        for tab_name in tabs:
+            if not self.tab_exists(tab_name):
+                continue
+            results[tab_name] = self.sort_tab_for_usage(tab_name)
+        return results
+
+    def sort_tab_for_usage(self, tab_name: str | None = None) -> bool:
+        self.ensure_headers(tab_name)
+        rows_with_indexes = self.iter_rows(tab_name)
+        if len(rows_with_indexes) < 2:
+            if rows_with_indexes:
+                row_index = rows_with_indexes[0][0]
+                self.ensure_used_checkbox_column(tab_name, start_row=row_index, end_row=row_index)
+            return True
+
+        if has_active_processing_rows([row for _row_index, row in rows_with_indexes]):
+            return False
+
+        sorted_rows = sort_rows_for_usage([row for _row_index, row in rows_with_indexes])
+        start_row = 2
+        end_row = start_row + len(sorted_rows) - 1
+        self._values().update(
+            spreadsheetId=self._sheet_id(),
+            range=f"{self._tab(tab_name)}!A{start_row}:{last_sheet_column()}{end_row}",
+            valueInputOption="USER_ENTERED",
+            body={"values": [row.to_values() for row in sorted_rows]},
+        ).execute()
+        self.ensure_used_checkbox_column(tab_name, start_row=start_row, end_row=end_row)
+        return True
 
     def tab_exists(self, tab_name: str) -> bool:
         spreadsheet = (
@@ -395,6 +440,43 @@ def normalize_used_value(value: bool | str) -> bool:
     return str(value).strip().upper() == "TRUE"
 
 
+TERMINAL_SHEET_STATUSES = {
+    ProcessingStatus.COMPLETE.value,
+    ProcessingStatus.PARTIAL_COMPLETE.value,
+    ProcessingStatus.INVALID_URL.value,
+    ProcessingStatus.QUEUE_FAILED.value,
+    ProcessingStatus.CANCELLED.value,
+}
+
+
+def has_active_processing_rows(rows: list[SheetRow]) -> bool:
+    return any(str(row.status or "").strip() not in {"", *TERMINAL_SHEET_STATUSES} for row in rows)
+
+
+def sort_rows_for_usage(rows: list[SheetRow]) -> list[SheetRow]:
+    return sorted(rows, key=sheet_usage_sort_key)
+
+
+def sheet_usage_sort_key(row: SheetRow) -> tuple[int, float]:
+    is_used = normalize_used_value(row.used)
+    timestamp = row.used_at if is_used else row.created_at
+    fallback_timestamp = row.created_at if is_used else ""
+    return (1 if is_used else 0, -parse_sheet_timestamp(timestamp or fallback_timestamp))
+
+
+def parse_sheet_timestamp(value: str) -> float:
+    value = str(value or "").strip()
+    if not value:
+        return 0
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return 0
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
 def used_sync_updates(
     rows_by_tab: dict[str, list[tuple[int, SheetRow]]],
     *,
@@ -404,8 +486,10 @@ def used_sync_updates(
     reel_url: str = "",
     edited_tab_name: str = "",
     edited_row_number: int | None = None,
+    used_at: str = "",
 ) -> list[tuple[str, int]]:
     updates: list[tuple[str, int]] = []
+    wanted_used_at = used_at if used else ""
     for tab_name, rows in rows_by_tab.items():
         for row_index, row in rows:
             if tab_name == edited_tab_name and row_index == edited_row_number:
@@ -417,7 +501,7 @@ def used_sync_updates(
                 reel_url=reel_url,
             ):
                 continue
-            if normalize_used_value(row.used) == used:
+            if normalize_used_value(row.used) == used and row.used_at == wanted_used_at:
                 continue
             updates.append((tab_name, row_index))
     return updates

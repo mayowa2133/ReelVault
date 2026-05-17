@@ -220,12 +220,13 @@ Caption 1, Caption 2, Caption 3, Tags, Error Message, Pillar,
 Pillar Source, Pillar Confidence, Script Title, Re-hooks, Custom Script,
 Script Google Doc Link, Used, Inspiration Folder Link, Source Type,
 Telegram File ID, Telegram File Unique ID, Telegram File Name,
-Telegram MIME Type, Telegram File Size
+Telegram MIME Type, Telegram File Size, Used At
 ```
 
 The app inserts one row when processing starts and updates that same row as each step completes.
 Existing Sheets are upgraded by appending new columns, so existing row data stays in place.
 The `Used` column is configured as a Google Sheets checkbox so you can mark ideas you already turned into content. With the optional Apps Script trigger installed, checking `Used` moves that inspiration folder into a pillar-level `Used` folder, such as `ReelVault/Motivation/Used`. Unchecking it moves the folder back into the active pillar folder.
+Sheets are sorted after processing completes and after `Used` checkbox edits. Active ideas stay at the top newest-first by `Created At`. Used ideas stay below active ideas, newest-first by `Used At`.
 
 ReelVault keeps the configured tab, usually `Reels`, as the full archive. When a Reel has a pillar, the completed row is also copied into a matching pillar tab:
 
@@ -270,6 +271,8 @@ Drive files are organized by pillar and then by inspiration. ReelVault creates s
 
 The backend exposes `POST /webhook/sheets/used` for Google Sheets checkbox edits. It is protected by `SHEETS_WEBHOOK_SECRET`; do not expose this secret in public docs or screenshots.
 
+When `Used` is checked, ReelVault writes `Used At`, syncs the checkbox across the main `Reels` tab and the matching pillar tab, moves the Drive folder to `{Pillar}/Used`, and sorts the tabs so active ideas remain above used ideas. If another Reel is still queued or processing, the main archive sort is skipped until processing reaches a safe terminal state; this avoids moving row numbers while Cloud Tasks still needs them.
+
 Cloud Run setup:
 
 1. Create a Secret Manager secret named `sheets-webhook-secret` with a long random value.
@@ -296,8 +299,9 @@ Smoke test:
 
 1. Check `Used` on a completed row with an `Inspiration Folder Link`.
 2. Confirm the folder moves to the matching pillar's `Used` folder.
-3. Confirm the matching row in the main `Reels` tab or pillar tab also updates.
-4. Uncheck `Used` and confirm the folder moves back to the active pillar folder.
+3. Confirm `Used At` is filled and the matching row in the main `Reels` tab or pillar tab also updates.
+4. Confirm active ideas are still at the top and used ideas are grouped below with the newest used item first.
+5. Uncheck `Used` and confirm the folder moves back to the active pillar folder.
 
 ## Instagram Cookies
 
@@ -556,6 +560,7 @@ The included tests cover Instagram Reel URL extraction, Telegram pillar parsing/
 | `/webhook/sheets/used` returns `401` | Check `SHEETS_WEBHOOK_SECRET` in Cloud Run and the same value in Apps Script properties. |
 | Google Drive upload failed | Verify `GOOGLE_DRIVE_FOLDER_ID` and that the authorized Google account can create files in that folder. |
 | Used checkbox does not move folders | Confirm the Apps Script installable trigger is installed, the row has an `Inspiration Folder Link`, and the OAuth account can move Drive folders. |
+| Used rows do not immediately reorder | If any row is still queued or processing, ReelVault skips archive sorting until it is safe to move rows. Wait for processing to finish or toggle `Used` again. |
 | Google Doc script creation failed | Enable the Google Docs API, rerun OAuth setup for the Docs scope, and verify the authorized account can create files in the Drive folder. |
 | `FFmpeg is not installed` | Use Docker or install FFmpeg locally and make sure `ffmpeg` is on `PATH`. |
 | OpenAI transcription failed | Check `OPENAI_API_KEY`, audio file size, and `OPENAI_TRANSCRIPTION_MODEL`. Lower `MAX_AUDIO_SIZE_MB` only if your model limit is smaller. |

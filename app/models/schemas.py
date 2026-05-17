@@ -97,6 +97,7 @@ class SheetUsedWebhookPayload(BaseModel):
     sheet_name: str = Field(alias="sheetName")
     row_number: int = Field(alias="rowNumber", ge=2)
     used: bool
+    used_at: str = Field(default="", alias="usedAt")
     pillar: str = ""
     shortcode: str = ""
     reel_url: str = Field(default="", alias="reelUrl")
@@ -198,6 +199,7 @@ SHEET_FIELDS = [
     ("Telegram File Name", "telegram_file_name"),
     ("Telegram MIME Type", "telegram_mime_type"),
     ("Telegram File Size", "telegram_file_size"),
+    ("Used At", "used_at"),
 ]
 
 SHEET_COLUMNS = [column for column, _field in SHEET_FIELDS]
@@ -258,6 +260,7 @@ class SheetRow(BaseModel):
     telegram_file_name: str = ""
     telegram_mime_type: str = ""
     telegram_file_size: str = ""
+    used_at: str = ""
 
     @classmethod
     def from_reel(cls, reel: ReelReference) -> "SheetRow":
@@ -342,6 +345,10 @@ class SheetRow(BaseModel):
             self.error_message = f"{self.error_message}\n{clean_message}"
         else:
             self.error_message = clean_message
+
+    def apply_used_state(self, used: bool, used_at: str | None = None) -> None:
+        self.used = "TRUE" if used else "FALSE"
+        self.used_at = (used_at or utc_now_iso()) if used else ""
 
     def to_values(self) -> list[str]:
         values: list[str] = []
