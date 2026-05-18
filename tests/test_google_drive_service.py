@@ -1,5 +1,8 @@
+from app.config import Settings
 from app.models.schemas import ContentPillar
 from app.services.google_drive_service import (
+    DriveFolderResult,
+    GoogleDriveService,
     escape_drive_query_value,
     extract_drive_folder_id_from_link,
     inspiration_folder_name,
@@ -11,6 +14,34 @@ from app.services.google_drive_service import (
 def test_pillar_folder_name_uses_display_value():
     assert pillar_folder_name(ContentPillar.JOB_SEARCH) == "Job Search"
     assert pillar_folder_name("Tech") == "Tech"
+
+
+def test_raw_folder_setting_defaults_to_raw():
+    assert Settings().raw_folder_name == "Raw"
+
+
+def test_ensure_all_raw_pillar_folders_creates_raw_pillar_tree():
+    class FakeDriveService(GoogleDriveService):
+        def __init__(self):
+            self.settings = Settings(google_drive_folder_id="root")
+            self.calls = []
+
+        def get_or_create_child_folder(self, parent_folder_id: str, folder_name: str) -> DriveFolderResult:
+            self.calls.append((parent_folder_id, folder_name))
+            return DriveFolderResult(
+                folder_id=f"{parent_folder_id}/{folder_name}",
+                name=folder_name,
+                web_view_link=f"https://drive.google.com/drive/folders/{parent_folder_id}/{folder_name}",
+            )
+
+    drive = FakeDriveService()
+
+    folders = drive.ensure_all_raw_pillar_folders()
+
+    assert folders["Tech"] == "root/Raw/Tech"
+    assert ("root", "Raw") in drive.calls
+    assert ("root/Raw", "Gym") in drive.calls
+    assert ("root/Raw", "Faith") in drive.calls
 
 
 def test_escape_drive_query_value_escapes_quotes_and_backslashes():

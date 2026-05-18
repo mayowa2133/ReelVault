@@ -80,6 +80,15 @@ class GoogleDriveService:
         pillar_folder_id = self.get_or_create_pillar_folder(pillar)
         return self.get_or_create_child_folder(pillar_folder_id, self.settings.used_folder_name)
 
+    def get_or_create_raw_root_folder(self) -> DriveFolderResult:
+        if not self.settings.google_drive_folder_id:
+            raise ExternalServiceError("GOOGLE_DRIVE_FOLDER_ID is not configured", step="google_drive")
+        return self.get_or_create_child_folder(self.settings.google_drive_folder_id, self.settings.raw_folder_name)
+
+    def get_or_create_raw_pillar_folder(self, pillar: ContentPillar | str) -> DriveFolderResult:
+        raw_root = self.get_or_create_raw_root_folder()
+        return self.get_or_create_child_folder(raw_root.folder_id, pillar_folder_name(pillar))
+
     def get_or_create_inspiration_folder(
         self,
         pillar: ContentPillar | str,
@@ -149,6 +158,15 @@ class GoogleDriveService:
 
     def ensure_all_pillar_folders(self) -> dict[str, str]:
         return {pillar.value: self.get_or_create_pillar_folder(pillar) for pillar in ContentPillar}
+
+    def ensure_all_raw_pillar_folders(self) -> dict[str, str]:
+        return {pillar.value: self.get_or_create_raw_pillar_folder(pillar).folder_id for pillar in ContentPillar}
+
+    def ensure_drive_library_folders(self) -> dict[str, dict[str, str]]:
+        return {
+            "pillars": self.ensure_all_pillar_folders(),
+            "raw": self.ensure_all_raw_pillar_folders(),
+        }
 
     def move_file_to_folder(self, file_id: str, folder_id: str) -> None:
         self.move_item_to_folder(file_id, folder_id)

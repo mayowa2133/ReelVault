@@ -285,7 +285,9 @@ def pillar_folder_id_if_possible(
     if not row.pillar:
         return None
     try:
-        return drive.get_or_create_pillar_folder(row.pillar)
+        pillar_folder_id = drive.get_or_create_pillar_folder(row.pillar)
+        drive.get_or_create_raw_pillar_folder(row.pillar)
+        return pillar_folder_id
     except Exception as exc:
         row.append_error(f"Google Drive pillar folder failed: {public_error_message(exc)}")
         update_sheet()

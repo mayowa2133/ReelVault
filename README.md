@@ -98,6 +98,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `GOOGLE_SHEET_TAB_NAME` | Sheet tab name, defaults to `Reels`. |
 | `SHEETS_WEBHOOK_SECRET` | Shared secret required by `/webhook/sheets/used` for Used checkbox automation. |
 | `USED_FOLDER_NAME` | Name of the archive folder created inside each pillar folder, defaults to `Used`. |
+| `RAW_FOLDER_NAME` | Name of the top-level folder for your own raw video drafts, defaults to `Raw`. |
 | `GCP_PROJECT_ID` | Google Cloud project ID for Cloud Tasks. |
 | `GCP_LOCATION` | Cloud Tasks location, defaults to `us-central1`. |
 | `CLOUD_TASKS_QUEUE` | Cloud Tasks queue name, defaults to `reelvault-processing`. |
@@ -266,6 +267,27 @@ For each fully transcribed Reel, ReelVault generates:
 - A Google Doc script saved in the matching inspiration folder and linked from the Sheet.
 
 Drive files are organized by pillar and then by inspiration. ReelVault creates subfolders inside `GOOGLE_DRIVE_FOLDER_ID` named `Gym`, `Tech`, `Motivation`, `Morning Routine`, `Job Search`, and `Faith` as needed. After analysis, it creates a titled folder inside the matching pillar folder using the generated script title plus the Reel shortcode, then moves the video/audio into that folder and creates the script Google Doc there. The folder link is saved in the `Inspiration Folder Link` column.
+
+ReelVault also creates a separate `Raw` folder for your own raw versions of videos you make from the inspirations:
+
+```text
+ReelVault/
+  Raw/
+    Gym/
+    Tech/
+    Motivation/
+    Morning Routine/
+    Job Search/
+    Faith/
+```
+
+Use those `Raw` pillar folders for your own recordings, drafts, and exports. They stay separate from the saved inspiration folders so your creator assets do not get mixed with reference material.
+
+To create all pillar and raw folders immediately from your configured Google account, run:
+
+```bash
+python scripts/ensure_drive_folders.py
+```
 
 ## Used Checkbox Folder Automation
 
@@ -483,7 +505,7 @@ gcloud run deploy reelvault \
   --concurrency=1 \
   --min-instances=0 \
   --max-instances=2 \
-  --set-env-vars="PROCESSING_BACKEND=cloud_tasks,GCP_PROJECT_ID=$PROJECT_ID,GCP_LOCATION=$REGION,CLOUD_TASKS_QUEUE=$QUEUE,CLOUD_TASKS_CREATE_TIMEOUT_SECONDS=30,GOOGLE_DRIVE_FOLDER_ID=$GOOGLE_DRIVE_FOLDER_ID,GOOGLE_SHEET_ID=$GOOGLE_SHEET_ID,GOOGLE_SHEET_TAB_NAME=Reels,USED_FOLDER_NAME=Used,TEMP_DIR=/tmp/reelvault,ENABLE_VIDEO_DOWNLOAD=true,ENABLE_AUDIO_UPLOAD=true,ENABLE_TELEGRAM_MEDIA_FALLBACK=true,TELEGRAM_MEDIA_MAX_SIZE_MB=100,TELEGRAM_MEDIA_DOWNLOAD_TIMEOUT_SECONDS=300" \
+  --set-env-vars="PROCESSING_BACKEND=cloud_tasks,GCP_PROJECT_ID=$PROJECT_ID,GCP_LOCATION=$REGION,CLOUD_TASKS_QUEUE=$QUEUE,CLOUD_TASKS_CREATE_TIMEOUT_SECONDS=30,GOOGLE_DRIVE_FOLDER_ID=$GOOGLE_DRIVE_FOLDER_ID,GOOGLE_SHEET_ID=$GOOGLE_SHEET_ID,GOOGLE_SHEET_TAB_NAME=Reels,USED_FOLDER_NAME=Used,RAW_FOLDER_NAME=Raw,TEMP_DIR=/tmp/reelvault,ENABLE_VIDEO_DOWNLOAD=true,ENABLE_AUDIO_UPLOAD=true,ENABLE_TELEGRAM_MEDIA_FALLBACK=true,TELEGRAM_MEDIA_MAX_SIZE_MB=100,TELEGRAM_MEDIA_DOWNLOAD_TIMEOUT_SECONDS=300" \
   --set-secrets="TELEGRAM_BOT_TOKEN=telegram-bot-token:latest,TELEGRAM_WEBHOOK_SECRET=telegram-webhook-secret:latest,TASK_REQUEST_SECRET=task-request-secret:latest,SHEETS_WEBHOOK_SECRET=sheets-webhook-secret:latest,OPENAI_API_KEY=openai-api-key:latest,GOOGLE_OAUTH_TOKEN_JSON=google-oauth-token-json:latest,INSTAGRAM_COOKIES_TEXT=instagram-cookies-text:latest"
 ```
 

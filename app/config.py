@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     google_sheet_tab_name: str = "Reels"
     sheets_webhook_secret: str | None = None
     used_folder_name: str = "Used"
+    raw_folder_name: str = "Raw"
 
     gcp_project_id: str | None = None
     gcp_location: str = "us-central1"
