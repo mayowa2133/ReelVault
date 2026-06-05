@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -15,6 +16,50 @@ except ImportError:  # pragma: no cover - exercised only when dependency is miss
     yt_dlp = None  # type: ignore[assignment]
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class YoutubeNoAuthFallbackStrategy:
+    name: str
+    youtube_args: dict[str, list[str]]
+    format_selector: str | None = None
+
+
+YOUTUBE_FALLBACK_FORMAT = "18/best[ext=mp4]/bestvideo+bestaudio/best"
+YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES = (
+    YoutubeNoAuthFallbackStrategy(
+        name="mweb_no_webpage_configs",
+        youtube_args={
+            "player_client": ["mweb"],
+            "player_skip": ["webpage", "configs"],
+        },
+        format_selector=YOUTUBE_FALLBACK_FORMAT,
+    ),
+    YoutubeNoAuthFallbackStrategy(
+        name="all_clients_no_webpage",
+        youtube_args={
+            "player_client": ["all"],
+            "player_skip": ["webpage"],
+        },
+        format_selector=YOUTUBE_FALLBACK_FORMAT,
+    ),
+    YoutubeNoAuthFallbackStrategy(
+        name="all_clients_no_webpage_configs",
+        youtube_args={
+            "player_client": ["all"],
+            "player_skip": ["webpage", "configs"],
+        },
+        format_selector=YOUTUBE_FALLBACK_FORMAT,
+    ),
+    YoutubeNoAuthFallbackStrategy(
+        name="web_safari_no_webpage_configs",
+        youtube_args={
+            "player_client": ["web_safari"],
+            "player_skip": ["webpage", "configs"],
+        },
+        format_selector=YOUTUBE_FALLBACK_FORMAT,
+    ),
+)
 
 
 class DownloaderService:
@@ -38,19 +83,14 @@ class DownloaderService:
         except Exception as exc:
             reason = public_error_message(exc)
             if should_retry_youtube_without_webpage(url, reason):
-                try:
-                    fallback_options = self._youtube_no_auth_fallback_options(options)
-                    info, file_path = self._download_with_options(url, output_dir, fallback_options)
-                    logger.warning("youtube_download_succeeded_with_no_auth_fallback", extra={"url": url})
-                except Exception as fallback_exc:
-                    fallback_reason = public_error_message(fallback_exc)
-                    logger.warning(
-                        "reel_download_failed",
-                        extra={"error": reason, "fallback_error": fallback_reason},
-                    )
-                    return self._download_failed_result(
-                        f"{reason}. YouTube no-auth fallback also failed: {fallback_reason}"
-                    )
+                info, file_path, fallback_error = self._download_with_youtube_fallbacks(
+                    url,
+                    output_dir,
+                    options,
+                    reason,
+                )
+                if fallback_error:
+                    return self._download_failed_result(fallback_error)
             else:
                 logger.warning("reel_download_failed", extra={"error": reason})
                 return self._download_failed_result(reason)
@@ -92,6 +132,38 @@ class DownloaderService:
             ),
         )
 
+    def _download_with_youtube_fallbacks(
+        self,
+        url: str,
+        output_dir: Path,
+        options: dict[str, Any],
+        initial_reason: str,
+    ) -> tuple[dict[str, Any], Path | None, str | None]:
+        attempt_errors = [("default", initial_reason)]
+
+        for strategy in YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES:
+            try:
+                fallback_options = self._youtube_no_auth_fallback_options(options, strategy)
+                info, file_path = self._download_with_options(url, output_dir, fallback_options)
+                logger.warning(
+                    "youtube_download_succeeded_with_no_auth_fallback",
+                    extra={"url": url, "strategy": strategy.name},
+                )
+                return info, file_path, None
+            except Exception as fallback_exc:
+                fallback_reason = public_error_message(fallback_exc)
+                attempt_errors.append((strategy.name, fallback_reason))
+                logger.warning(
+                    "youtube_no_auth_fallback_failed",
+                    extra={"url": url, "strategy": strategy.name, "error": fallback_reason},
+                )
+
+        logger.warning("reel_download_failed", extra={"error": summarize_attempt_errors(attempt_errors)})
+        return {}, None, (
+            f"{initial_reason}. YouTube no-auth fallback attempts also failed: "
+            f"{summarize_attempt_errors(attempt_errors[1:])}"
+        )
+
     def _yt_dlp_options(self, output_template: str, output_dir: Path) -> dict[str, Any]:
         options: dict[str, Any] = {
             "outtmpl": output_template,
@@ -117,15 +189,21 @@ class DownloaderService:
             options["cookiefile"] = str(cookie_file)
         return options
 
-    def _youtube_no_auth_fallback_options(self, options: dict[str, Any]) -> dict[str, Any]:
+    def _youtube_no_auth_fallback_options(
+        self,
+        options: dict[str, Any],
+        strategy: YoutubeNoAuthFallbackStrategy = YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES[0],
+    ) -> dict[str, Any]:
         fallback_options = dict(options)
+        extractor_args = dict(fallback_options.get("extractor_args") or {})
+        youtube_args = dict(extractor_args.get("youtube") or {})
+        youtube_args.update(strategy.youtube_args)
+        extractor_args["youtube"] = youtube_args
         fallback_options["extractor_args"] = {
-            **fallback_options.get("extractor_args", {}),
-            "youtube": {
-                "player_client": ["mweb"],
-                "player_skip": ["webpage", "configs"],
-            },
+            **extractor_args,
         }
+        if strategy.format_selector:
+            fallback_options["format"] = strategy.format_selector
         return fallback_options
 
     def _cookie_file(self, output_dir: Path) -> Path | None:
@@ -196,6 +274,17 @@ def safe_str(value: Any) -> str | None:
     return text or None
 
 
+def summarize_attempt_errors(attempt_errors: list[tuple[str, str]]) -> str:
+    return "; ".join(f"{name}: {short_error(reason)}" for name, reason in attempt_errors)
+
+
+def short_error(reason: str, max_length: int = 300) -> str:
+    compact = " ".join(reason.split())
+    if len(compact) <= max_length:
+        return compact
+    return f"{compact[: max_length - 3]}..."
+
+
 def should_retry_youtube_without_webpage(url: str, error_message: str) -> bool:
     parsed = urlsplit(url)
     host = parsed.netloc.lower().removeprefix("www.")
@@ -210,5 +299,11 @@ def should_retry_youtube_without_webpage(url: str, error_message: str) -> bool:
             "not a bot",
             "use --cookies",
             "use --cookies-from-browser",
+            "failed to extract any player response",
+            "all player responses are invalid",
+            "no video formats found",
+            "http error 403",
+            "youtube is requiring a captcha",
+            "this content isn't available, try again later",
         )
     )

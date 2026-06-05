@@ -335,7 +335,9 @@ Smoke test:
 
 ReelVault uses yt-dlp anonymously by default for public YouTube, Instagram Reel, TikTok, and X/Twitter video URLs. Old `INSTAGRAM_COOKIES_*` values are ignored unless `ENABLE_AUTH_COOKIES=true`, which prevents stale cookies from breaking public no-auth downloads.
 
-For YouTube bot-check responses, ReelVault automatically retries once with yt-dlp's mobile web player client while skipping the initial YouTube webpage/config requests. This can work around some Cloud Run datacenter IP challenges without cookies, but it is still not guaranteed for every URL.
+For YouTube bot-check responses, ReelVault automatically tries a short no-auth fallback chain. It first retries with yt-dlp's mobile web player client while skipping the initial YouTube webpage/config requests, then tries broader YouTube client probing while skipping the bot-checked watch page and preferring small combined MP4 formats. This can work around some Cloud Run datacenter IP challenges without cookies, but it is still not guaranteed for every URL.
+
+If every anonymous YouTube client path is blocked from the Cloud Run IP, the next non-cookie option is a yt-dlp PO Token provider. PO Tokens are short-lived playback attestation tokens, not account cookies, but they require extra runtime dependencies and may need per-video refreshes as YouTube changes enforcement.
 
 Some provider URLs can still fail because platforms rate limit datacenter IPs, change APIs, require login for specific content, or block anonymous access. ReelVault records these as `download_failed` and keeps the source URL for manual review instead of crashing the workflow.
 
@@ -597,7 +599,7 @@ The included tests cover social video URL extraction, Telegram pillar parsing/ca
 | YouTube download reports no supported JavaScript runtime | Use Docker or install Deno locally and make sure `deno` is on `PATH`. |
 | OpenAI transcription failed | Check `OPENAI_API_KEY`, audio file size, and `OPENAI_TRANSCRIPTION_MODEL`. Lower `MAX_AUDIO_SIZE_MB` only if your model limit is smaller. |
 | Provider download failed | This is expected for some links. The row will be saved for manual review. Try a fresh public video URL or set `ENABLE_VIDEO_DOWNLOAD=false` if you only want URL tracking. |
-| Provider works locally but fails on Cloud Run | Datacenter IPs are blocked more often. Try a different public URL, upload the video directly to Telegram, or intentionally enable cookie fallback with `ENABLE_AUTH_COOKIES=true`. |
+| Provider works locally but fails on Cloud Run | Datacenter IPs are blocked more often. ReelVault retries several no-cookie YouTube client paths automatically, but some links may still need Telegram upload fallback, a yt-dlp PO Token provider, or intentionally enabled cookie fallback with `ENABLE_AUTH_COOKIES=true`. |
 | Telegram upload fallback fails | Check `ENABLE_TELEGRAM_MEDIA_FALLBACK`, file size, and whether Telegram Bot API can provide the uploaded file. Try sending the media as a document if sending as video fails. |
 
 ## How the Workflow Handles Failures
