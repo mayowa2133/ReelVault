@@ -218,7 +218,7 @@ def upload_video_if_possible(
         folder_id = pillar_folder_id_if_possible(drive, row, update_sheet)
         upload = drive.upload_file(
             video_path,
-            description=f"Private Reel inspiration reference: {row.reel_url}",
+            description=f"Private video inspiration reference: {row.reel_url}",
             folder_id=folder_id,
         )
         row.drive_video_link = upload.web_view_link or ""
@@ -248,7 +248,7 @@ def upload_audio_if_possible(
         for audio_path in audio_files:
             upload = drive.upload_file(
                 audio_path,
-                description=f"Private Reel inspiration audio: {row.reel_url}",
+                description=f"Private video inspiration audio: {row.reel_url}",
                 folder_id=folder_id,
             )
             if upload.web_view_link:

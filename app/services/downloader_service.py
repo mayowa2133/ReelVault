@@ -43,8 +43,8 @@ class DownloaderService:
                 success=False,
                 status="download_failed",
                 error_message=(
-                    "Download failed. Instagram may require login, block automated requests, "
-                    f"or rate limit this link. Details: {reason}"
+                    "Download failed. The platform may require login, block automated requests, "
+                    f"rate limit this link, or expose media that yt-dlp cannot access anonymously. Details: {reason}"
                 ),
             )
 
@@ -78,6 +78,8 @@ class DownloaderService:
             "noplaylist": True,
             "quiet": True,
             "no_warnings": True,
+            "noprogress": True,
+            "cachedir": False,
             "retries": 1,
             "socket_timeout": 30,
             "http_headers": {
@@ -94,17 +96,22 @@ class DownloaderService:
         return options
 
     def _cookie_file(self, output_dir: Path) -> Path | None:
-        if self.settings.instagram_cookies_text:
-            cookie_file = output_dir / "instagram_cookies.txt"
-            cookie_file.write_text(self.settings.instagram_cookies_text, encoding="utf-8")
+        if not self.settings.enable_auth_cookies:
+            return None
+
+        cookies_text = self.settings.social_cookies_text or self.settings.instagram_cookies_text
+        if cookies_text:
+            cookie_file = output_dir / "social_cookies.txt"
+            cookie_file.write_text(cookies_text, encoding="utf-8")
             cookie_file.chmod(0o600)
             return cookie_file
 
-        if self.settings.instagram_cookies_file:
-            cookie_file = Path(self.settings.instagram_cookies_file)
+        cookies_path = self.settings.social_cookies_file or self.settings.instagram_cookies_file
+        if cookies_path:
+            cookie_file = Path(cookies_path)
             if cookie_file.exists():
                 return cookie_file
-            logger.warning("instagram_cookies_file_missing", extra={"path": str(cookie_file)})
+            logger.warning("social_cookies_file_missing", extra={"path": str(cookie_file)})
         return None
 
 

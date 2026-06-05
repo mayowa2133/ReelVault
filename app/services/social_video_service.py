@@ -1,0 +1,188 @@
+from __future__ import annotations
+
+import re
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit, urlunsplit
+
+from app.models.schemas import ReelReference
+
+
+SUPPORTED_SOCIAL_DOMAINS = (
+    "instagram.com",
+    "youtube.com",
+    "youtu.be",
+    "tiktok.com",
+    "x.com",
+    "twitter.com",
+)
+
+SOCIAL_URL_PATTERN = re.compile(
+    r"https?://(?:[A-Za-z0-9-]+\.)?(?:instagram\.com|youtube\.com|youtu\.be|tiktok\.com|x\.com|twitter\.com)/[^\s<>\"]+",
+    flags=re.IGNORECASE,
+)
+
+TRAILING_PUNCTUATION = ".,!?;:)']}>"
+
+
+class SocialVideoService:
+    """URL extraction and normalization for yt-dlp-backed social videos."""
+
+    @staticmethod
+    def extract_supported_urls(text: str) -> list[ReelReference]:
+        if not text:
+            return []
+
+        found: list[ReelReference] = []
+        seen: set[str] = set()
+        for match in SOCIAL_URL_PATTERN.finditer(text):
+            raw_url = match.group(0).rstrip(TRAILING_PUNCTUATION)
+            reference = SocialVideoService.normalize_url(raw_url)
+            dedupe_key = f"{reference.provider}:{reference.shortcode or reference.url}" if reference else ""
+            if reference and dedupe_key not in seen:
+                found.append(reference)
+                seen.add(dedupe_key)
+        return found
+
+    @staticmethod
+    def normalize_url(raw_url: str) -> ReelReference | None:
+        parsed = urlsplit(raw_url)
+        host = parsed.netloc.lower()
+        host = host.removeprefix("www.")
+
+        if host == "instagram.com":
+            return normalize_instagram_url(raw_url)
+        if host in {"youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}:
+            return normalize_youtube_url(raw_url)
+        if host in {"tiktok.com", "m.tiktok.com", "vm.tiktok.com", "vt.tiktok.com"}:
+            return normalize_tiktok_url(raw_url)
+        if host in {"x.com", "twitter.com", "mobile.twitter.com"}:
+            return normalize_x_url(raw_url)
+        return None
+
+
+def normalize_instagram_url(raw_url: str) -> ReelReference | None:
+    parsed = urlsplit(raw_url)
+    host = parsed.netloc.lower()
+    if host not in {"instagram.com", "www.instagram.com"}:
+        return None
+
+    parts = [unquote(part) for part in parsed.path.split("/") if part]
+    if len(parts) >= 2 and parts[0].lower() == "reel":
+        shortcode = parts[1]
+        normalized = f"https://www.instagram.com/reel/{quote(shortcode)}/"
+        return ReelReference(url=normalized, raw_url=raw_url, shortcode=shortcode, provider="instagram")
+
+    if len(parts) >= 3 and parts[0].lower() == "share" and parts[1].lower() == "reel":
+        share_token = parts[2]
+        normalized = f"https://www.instagram.com/share/reel/{quote(share_token)}/"
+        return ReelReference(
+            url=normalized,
+            raw_url=raw_url,
+            shortcode=share_token,
+            is_share_url=True,
+            provider="instagram",
+        )
+
+    return None
+
+
+def normalize_youtube_url(raw_url: str) -> ReelReference | None:
+    parsed = urlsplit(raw_url)
+    host = parsed.netloc.lower().removeprefix("www.")
+    query = parse_qs(parsed.query)
+
+    if host == "youtu.be":
+        video_id = first_path_part(parsed.path)
+        if not video_id:
+            return None
+        return ReelReference(
+            url=f"https://youtu.be/{quote(video_id)}",
+            raw_url=raw_url,
+            shortcode=video_id,
+            provider="youtube",
+        )
+
+    if host not in {"youtube.com", "m.youtube.com", "music.youtube.com"}:
+        return None
+
+    parts = [unquote(part) for part in parsed.path.split("/") if part]
+    video_id = None
+    normalized_path = parsed.path
+    normalized_query = ""
+
+    if parts and parts[0].lower() == "watch":
+        video_id = first_query_value(query, "v")
+        if not video_id:
+            return None
+        normalized_path = "/watch"
+        normalized_query = urlencode({"v": video_id})
+    elif len(parts) >= 2 and parts[0].lower() in {"shorts", "live", "embed"}:
+        video_id = parts[1]
+        normalized_path = f"/{parts[0].lower()}/{quote(video_id)}"
+    else:
+        return None
+
+    return ReelReference(
+        url=urlunsplit(("https", "www.youtube.com", normalized_path, normalized_query, "")),
+        raw_url=raw_url,
+        shortcode=video_id,
+        provider="youtube",
+    )
+
+
+def normalize_tiktok_url(raw_url: str) -> ReelReference | None:
+    parsed = urlsplit(raw_url)
+    host = parsed.netloc.lower().removeprefix("www.")
+    if host not in {"tiktok.com", "m.tiktok.com", "vm.tiktok.com", "vt.tiktok.com"}:
+        return None
+
+    parts = [unquote(part) for part in parsed.path.split("/") if part]
+    if not parts:
+        return None
+
+    shortcode = None
+    if len(parts) >= 3 and parts[0].startswith("@") and parts[1].lower() == "video":
+        shortcode = parts[2]
+    elif host in {"vm.tiktok.com", "vt.tiktok.com"}:
+        shortcode = parts[0]
+    elif len(parts) >= 2 and parts[0].lower() in {"t", "v"}:
+        shortcode = parts[1]
+
+    if not shortcode:
+        return None
+
+    normalized_path = "/" + "/".join(quote(part, safe="@") for part in parts)
+    return ReelReference(
+        url=urlunsplit(("https", parsed.netloc.lower(), normalized_path, "", "")),
+        raw_url=raw_url,
+        shortcode=shortcode,
+        provider="tiktok",
+    )
+
+
+def normalize_x_url(raw_url: str) -> ReelReference | None:
+    parsed = urlsplit(raw_url)
+    host = parsed.netloc.lower().removeprefix("www.")
+    if host not in {"x.com", "twitter.com", "mobile.twitter.com"}:
+        return None
+
+    parts = [unquote(part) for part in parsed.path.split("/") if part]
+    status_index = next((index for index, part in enumerate(parts) if part.lower() == "status"), None)
+    if status_index is None or len(parts) <= status_index + 1:
+        return None
+
+    status_id = parts[status_index + 1]
+    username = parts[status_index - 1] if status_index > 0 else "i"
+    normalized = f"https://x.com/{quote(username)}/status/{quote(status_id)}"
+    return ReelReference(url=normalized, raw_url=raw_url, shortcode=status_id, provider="x")
+
+
+def first_path_part(path: str) -> str | None:
+    for part in path.split("/"):
+        if part:
+            return unquote(part)
+    return None
+
+
+def first_query_value(query: dict[str, list[str]], key: str) -> str | None:
+    values = query.get(key) or []
+    return values[0] if values and values[0] else None

@@ -14,7 +14,7 @@ logger = get_logger(__name__)
 
 app = FastAPI(
     title="ReelVault",
-    description="Instagram Reel inspiration automation webhook service.",
+    description="Short-form social video inspiration automation webhook service.",
     version="0.1.0",
 )
 

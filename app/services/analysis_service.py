@@ -128,12 +128,12 @@ class AnalysisService:
             "Return that exact value for pillar and set pillar_confidence to 1."
             if selected_pillar
             else (
-                "Classify the Reel into exactly one primary pillar from this list: "
+                "Classify the source video into exactly one primary pillar from this list: "
                 "Gym, Tech, Motivation, Morning Routine, Job Search, Faith."
             )
         )
         return f"""
-Analyze this Instagram Reel transcript for private inspiration tracking.
+Analyze this short-form social video transcript for private inspiration tracking.
 
 Source URL: {reel_url}
 Creator username, if known: {creator}

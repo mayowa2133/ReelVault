@@ -75,7 +75,7 @@ class GoogleDocsService:
         parts = [
             row.script_title.strip() or "Custom Script",
             "",
-            f"Source Reel: {row.reel_url}",
+            f"Source Video: {row.reel_url}",
         ]
         if row.pillar:
             parts.append(f"Pillar: {row.pillar}")

@@ -1,4 +1,5 @@
 from app.services.instagram_service import InstagramService
+from app.services.social_video_service import SocialVideoService
 
 
 def test_extracts_and_normalizes_standard_reel_url():
@@ -37,3 +38,24 @@ def test_ignores_non_reel_urls():
 
     assert reels == []
 
+
+def test_extracts_supported_social_video_urls():
+    references = SocialVideoService.extract_supported_urls(
+        """
+        youtube https://www.youtube.com/watch?v=BaW_jenozKc&utm_source=x
+        short https://youtu.be/BaW_jenozKc?si=tracking
+        tiktok https://www.tiktok.com/@creator/video/7234567890123456789?lang=en
+        x https://twitter.com/example/status/1790637656616943991?s=20
+        instagram https://www.instagram.com/reel/C7abcDEF123/?igsh=abc
+        """
+    )
+
+    assert [(reference.provider, reference.shortcode) for reference in references] == [
+        ("youtube", "BaW_jenozKc"),
+        ("tiktok", "7234567890123456789"),
+        ("x", "1790637656616943991"),
+        ("instagram", "C7abcDEF123"),
+    ]
+    assert references[0].url == "https://www.youtube.com/watch?v=BaW_jenozKc"
+    assert references[1].url == "https://www.tiktok.com/@creator/video/7234567890123456789"
+    assert references[2].url == "https://x.com/example/status/1790637656616943991"

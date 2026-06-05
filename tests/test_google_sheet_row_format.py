@@ -32,6 +32,16 @@ def test_sheet_row_values_match_header_count_and_order():
     assert values[SHEET_COLUMNS.index("Used")] == "FALSE"
     assert values[SHEET_COLUMNS.index("Used At")] == ""
     assert values[SHEET_COLUMNS.index("Inspiration Folder Link")] == "https://drive.google.com/drive/folders/folder-id"
+    assert values[SHEET_COLUMNS.index("Source Type")] == "instagram_url"
+
+
+def test_sheet_row_source_type_tracks_provider():
+    row = SheetRow.from_reel(
+        ReelReference(url="https://www.youtube.com/watch?v=BaW_jenozKc", shortcode="BaW_jenozKc", provider="youtube")
+    )
+
+    assert row.source_type == "youtube_url"
+    assert row.to_reel_reference().provider == "youtube"
 
 
 def test_sheet_row_truncates_long_transcripts():

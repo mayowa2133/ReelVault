@@ -1,6 +1,6 @@
 # ReelVault
 
-ReelVault is a production-oriented MVP for private Instagram Reel inspiration tracking. Send one or more Instagram Reel URLs to a Telegram bot and the FastAPI backend saves the source URL to Google Sheets, best-effort downloads the Reel for private reference, uploads media to Google Drive, extracts/transcribes audio, classifies the Reel into a content pillar, generates original content ideas and a custom staircase-style script with OpenAI, saves the script as a Google Doc, updates the same Google Sheets row, and sends a Telegram summary.
+ReelVault is a production-oriented MVP for private short-form video inspiration tracking. Send one or more public YouTube, Instagram Reel, TikTok, or X/Twitter video URLs to a Telegram bot and the FastAPI backend saves the source URL to Google Sheets, best-effort downloads the video with yt-dlp without authentication by default, uploads media to Google Drive, extracts/transcribes audio, classifies the video into a content pillar, generates original content ideas and a custom staircase-style script with OpenAI, saves the script as a Google Doc, updates the same Google Sheets row, and sends a Telegram summary.
 
 This project is for private inspiration workflows only. It does not repost, redistribute, or claim ownership of another creator's work.
 
@@ -27,6 +27,7 @@ Telegram
 - Python 3.11+
 - Docker and Docker Compose, recommended for production-like local runs
 - FFmpeg, installed locally or through the Docker image
+- Deno, recommended for local YouTube downloads; the Docker image installs it automatically for yt-dlp's YouTube JavaScript challenge support
 - Telegram bot token
 - OpenAI API key
 - Google OAuth desktop client credentials JSON
@@ -111,11 +112,14 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `MAX_AUDIO_SIZE_MB` | Maximum audio chunk size sent to transcription. |
 | `ENABLE_VIDEO_DOWNLOAD` | Set `false` to save URLs without downloading. |
 | `ENABLE_AUDIO_UPLOAD` | Set `false` to avoid uploading extracted audio. |
-| `ENABLE_TELEGRAM_MEDIA_FALLBACK` | Allows uploading a video directly to Telegram when Instagram blocks download. |
+| `ENABLE_TELEGRAM_MEDIA_FALLBACK` | Allows uploading a video directly to Telegram when provider download fails. |
 | `TELEGRAM_MEDIA_MAX_SIZE_MB` | Maximum Telegram-uploaded media size accepted by ReelVault. |
 | `TELEGRAM_MEDIA_DOWNLOAD_TIMEOUT_SECONDS` | Timeout for downloading uploaded Telegram media inside the worker. |
-| `INSTAGRAM_COOKIES_FILE` | Optional path to a Netscape-format Instagram `cookies.txt` file for `yt-dlp`. |
-| `INSTAGRAM_COOKIES_TEXT` | Optional full contents of Instagram `cookies.txt`, useful as a Cloud Run Secret Manager value. |
+| `ENABLE_AUTH_COOKIES` | Defaults to `false`. Set `true` only if you intentionally want yt-dlp to use a cookies file/text fallback. |
+| `SOCIAL_COOKIES_FILE` | Optional path to a Netscape-format `cookies.txt` file for yt-dlp when `ENABLE_AUTH_COOKIES=true`. |
+| `SOCIAL_COOKIES_TEXT` | Optional full contents of `cookies.txt`, useful as a Cloud Run Secret Manager value when `ENABLE_AUTH_COOKIES=true`. |
+| `INSTAGRAM_COOKIES_FILE` | Legacy alias for `SOCIAL_COOKIES_FILE`; ignored unless `ENABLE_AUTH_COOKIES=true`. |
+| `INSTAGRAM_COOKIES_TEXT` | Legacy alias for `SOCIAL_COOKIES_TEXT`; ignored unless `ENABLE_AUTH_COOKIES=true`. |
 | `ENABLE_DEBUG_LOGGING` | Enables verbose structured JSON logs. |
 
 ## Telegram Bot Setup
@@ -239,12 +243,14 @@ Those pillar tabs use the same columns and checkbox format, which makes them fas
 
 ## Telegram Pillars and Script Output
 
-You can optionally tell the bot the pillar in the same message as the Reel URL:
+You can optionally tell the bot the pillar in the same message as the source video URL:
 
 ```text
 motivation https://www.instagram.com/reel/SHORTCODE/
+tech https://www.youtube.com/shorts/VIDEO_ID
+gym https://www.tiktok.com/@creator/video/VIDEO_ID
+faith https://x.com/creator/status/STATUS_ID
 pillar: job search https://www.instagram.com/reel/SHORTCODE/
-gym reel https://www.instagram.com/reel/SHORTCODE/
 ```
 
 Supported pillars:
@@ -255,18 +261,18 @@ Gym, Tech, Motivation, Morning Routine, Job Search, Faith
 
 The bot accepts common aliases like `fitness`, `career`, `morning`, and `coding`. If a pillar looks misspelled, the bot pauses and asks you to confirm with inline buttons: `Yes, use ...`, `Let AI classify`, or `Cancel`.
 
-For each fully transcribed Reel, ReelVault generates:
+For each fully transcribed video, ReelVault generates:
 
 - 3 original re-hooks.
 - A custom original short-form script.
-- A custom script that starts from the source Reel's opening hook before branching into the rewritten version.
+- A custom script that starts from the source video's opening hook before branching into the rewritten version.
 - A script length target based on the source transcript word count and spoken-thought count.
 - A matched delivery tone, such as motivational, blunt, sarcastic, funny, calm, urgent, reflective, or instructional.
 - One complete thought per script line.
 - A staircase speaking structure where each line builds on the previous line.
 - A Google Doc script saved in the matching inspiration folder and linked from the Sheet.
 
-Drive files are organized by pillar and then by inspiration. ReelVault creates subfolders inside `GOOGLE_DRIVE_FOLDER_ID` named `Gym`, `Tech`, `Motivation`, `Morning Routine`, `Job Search`, and `Faith` as needed. After analysis, it creates a titled folder inside the matching pillar folder using the generated script title plus the Reel shortcode, then moves the video/audio into that folder and creates the script Google Doc there. The folder link is saved in the `Inspiration Folder Link` column.
+Drive files are organized by pillar and then by inspiration. ReelVault creates subfolders inside `GOOGLE_DRIVE_FOLDER_ID` named `Gym`, `Tech`, `Motivation`, `Morning Routine`, `Job Search`, and `Faith` as needed. After analysis, it creates a titled folder inside the matching pillar folder using the generated script title plus the provider video ID, then moves the video/audio into that folder and creates the script Google Doc there. The folder link is saved in the `Inspiration Folder Link` column.
 
 ReelVault also creates a separate `Raw` folder for your own raw versions of videos you make from the inspirations:
 
@@ -325,37 +331,36 @@ Smoke test:
 4. Confirm active ideas are still at the top and used ideas are grouped below with the newest used item first.
 5. Uncheck `Used` and confirm the folder moves back to the active pillar folder.
 
-## Instagram Cookies
+## Provider Downloads
 
-Cloud Run uses Google datacenter IPs, so Instagram may block anonymous downloads more often than local Docker. To improve download success, export Instagram cookies in Netscape `cookies.txt` format from a browser session you control and keep the file private.
+ReelVault uses yt-dlp anonymously by default for public YouTube, Instagram Reel, TikTok, and X/Twitter video URLs. Old `INSTAGRAM_COOKIES_*` values are ignored unless `ENABLE_AUTH_COOKIES=true`, which prevents stale cookies from breaking public no-auth downloads.
 
-Local Docker options:
+Some provider URLs can still fail because platforms rate limit datacenter IPs, change APIs, require login for specific content, or block anonymous access. ReelVault records these as `download_failed` and keeps the source URL for manual review instead of crashing the workflow.
 
-1. Save the file as `secrets/instagram-cookies.txt`.
-2. Set `INSTAGRAM_COOKIES_FILE=/secrets/instagram-cookies.txt`.
-3. Mount it into Docker:
+Optional cookie fallback:
+
+1. Export a trusted Netscape-format `cookies.txt` only if you need authenticated access for content you are allowed to view.
+2. Save it as `secrets/social-cookies.txt`.
+3. Set `ENABLE_AUTH_COOKIES=true` and `SOCIAL_COOKIES_FILE=/secrets/social-cookies.txt`.
+4. Mount it into Docker if running locally:
 
 ```yaml
-- ./secrets/instagram-cookies.txt:/secrets/instagram-cookies.txt:ro
+- ./secrets/social-cookies.txt:/secrets/social-cookies.txt:ro
 ```
 
-Cloud Run option:
+For Cloud Run, create a Secret Manager secret such as `social-cookies-text` and map it as `SOCIAL_COOKIES_TEXT=social-cookies-text:latest` only when `ENABLE_AUTH_COOKIES=true`.
 
-1. Create a Secret Manager secret named `instagram-cookies-text`.
-2. Paste the full contents of `cookies.txt` as the secret value.
-3. Add it to Cloud Run as an environment secret: `INSTAGRAM_COOKIES_TEXT=instagram-cookies-text:latest`.
-
-Cookies expire and can be revoked by Instagram. Refresh this secret when downloads start failing with login or rate-limit messages again. Do not commit cookies to Git.
+Cookies expire and can be revoked by providers. Refresh them when authenticated fallback starts failing. Do not commit cookies to Git.
 
 ## Telegram Upload Fallback
 
-If Instagram blocks Cloud Run, send the video file directly to the bot. Use a caption when possible:
+If a provider blocks Cloud Run, send the video file directly to the bot. Use a caption when possible:
 
 ```text
 tech https://www.instagram.com/reel/SHORTCODE/
 ```
 
-The bot will save the upload, transcribe it, analyze it, create the script doc, organize files in Drive, and update Sheets. If no Instagram URL is included in the caption, ReelVault uses a `telegram-upload://...` source reference.
+The bot will save the upload, transcribe it, analyze it, create the script doc, organize files in Drive, and update Sheets. If no supported source URL is included in the caption, ReelVault uses a `telegram-upload://...` source reference.
 
 ## OpenAI Setup
 
@@ -478,7 +483,7 @@ gcloud tasks queues create "$QUEUE" \
   --max-attempts=2
 ```
 
-Create Secret Manager values. `google-oauth-token-json` should contain the full contents of your local `secrets/token.json`. The `instagram-cookies-text` secret is optional; create it only if you are using Instagram cookies, and omit `INSTAGRAM_COOKIES_TEXT=instagram-cookies-text:latest` from deploy commands if you skip it.
+Create Secret Manager values. `google-oauth-token-json` should contain the full contents of your local `secrets/token.json`. Cookie secrets are optional and should be omitted for anonymous-first downloads.
 
 ```bash
 printf "%s" "$TELEGRAM_BOT_TOKEN" | gcloud secrets create telegram-bot-token --data-file=-
@@ -487,8 +492,8 @@ printf "%s" "$TASK_REQUEST_SECRET" | gcloud secrets create task-request-secret -
 printf "%s" "$SHEETS_WEBHOOK_SECRET" | gcloud secrets create sheets-webhook-secret --data-file=-
 printf "%s" "$OPENAI_API_KEY" | gcloud secrets create openai-api-key --data-file=-
 gcloud secrets create google-oauth-token-json --data-file=secrets/token.json
-# Optional, only when using Instagram cookies.
-gcloud secrets create instagram-cookies-text --data-file=secrets/instagram-cookies.txt
+# Optional, only when ENABLE_AUTH_COOKIES=true.
+gcloud secrets create social-cookies-text --data-file=secrets/social-cookies.txt
 ```
 
 Deploy the first revision. After it prints a service URL, redeploy once with `BASE_URL` and `CLOUD_TASKS_TARGET_URL` set to that URL.
@@ -506,7 +511,7 @@ gcloud run deploy reelvault \
   --min-instances=0 \
   --max-instances=2 \
   --set-env-vars="PROCESSING_BACKEND=cloud_tasks,GCP_PROJECT_ID=$PROJECT_ID,GCP_LOCATION=$REGION,CLOUD_TASKS_QUEUE=$QUEUE,CLOUD_TASKS_CREATE_TIMEOUT_SECONDS=30,GOOGLE_DRIVE_FOLDER_ID=$GOOGLE_DRIVE_FOLDER_ID,GOOGLE_SHEET_ID=$GOOGLE_SHEET_ID,GOOGLE_SHEET_TAB_NAME=Reels,USED_FOLDER_NAME=Used,RAW_FOLDER_NAME=Raw,TEMP_DIR=/tmp/reelvault,ENABLE_VIDEO_DOWNLOAD=true,ENABLE_AUDIO_UPLOAD=true,ENABLE_TELEGRAM_MEDIA_FALLBACK=true,TELEGRAM_MEDIA_MAX_SIZE_MB=100,TELEGRAM_MEDIA_DOWNLOAD_TIMEOUT_SECONDS=300" \
-  --set-secrets="TELEGRAM_BOT_TOKEN=telegram-bot-token:latest,TELEGRAM_WEBHOOK_SECRET=telegram-webhook-secret:latest,TASK_REQUEST_SECRET=task-request-secret:latest,SHEETS_WEBHOOK_SECRET=sheets-webhook-secret:latest,OPENAI_API_KEY=openai-api-key:latest,GOOGLE_OAUTH_TOKEN_JSON=google-oauth-token-json:latest,INSTAGRAM_COOKIES_TEXT=instagram-cookies-text:latest"
+  --set-secrets="TELEGRAM_BOT_TOKEN=telegram-bot-token:latest,TELEGRAM_WEBHOOK_SECRET=telegram-webhook-secret:latest,TASK_REQUEST_SECRET=task-request-secret:latest,SHEETS_WEBHOOK_SECRET=sheets-webhook-secret:latest,OPENAI_API_KEY=openai-api-key:latest,GOOGLE_OAUTH_TOKEN_JSON=google-oauth-token-json:latest"
 ```
 
 Set the final Cloud Run URL and redeploy:
@@ -518,6 +523,8 @@ gcloud run services update reelvault \
   --region="$REGION" \
   --set-env-vars="BASE_URL=$BASE_URL,CLOUD_TASKS_TARGET_URL=$BASE_URL/tasks/process-reel"
 ```
+
+If you intentionally enable cookie fallback later, update Cloud Run with both `ENABLE_AUTH_COOKIES=true` and a `SOCIAL_COOKIES_TEXT` secret mapping.
 
 Set Telegram webhook:
 
@@ -564,7 +571,7 @@ Put the service behind HTTPS with Caddy, Nginx, or a managed proxy, then set the
 pytest
 ```
 
-The included tests cover Instagram Reel URL extraction, Telegram pillar parsing/callback payloads, analysis schema validation, dynamic Google Sheets ranges, Google Sheets row formatting, Cloud Tasks queueing, task endpoint security, and OAuth token JSON loading.
+The included tests cover social video URL extraction, Telegram pillar parsing/callback payloads, analysis schema validation, dynamic Google Sheets ranges, Google Sheets row formatting, Cloud Tasks queueing, task endpoint security, and OAuth token JSON loading.
 
 ## Common Errors and Fixes
 
@@ -585,27 +592,28 @@ The included tests cover Instagram Reel URL extraction, Telegram pillar parsing/
 | Used rows do not immediately reorder | If any row is still queued or processing, ReelVault skips archive sorting until it is safe to move rows. Wait for processing to finish or toggle `Used` again. |
 | Google Doc script creation failed | Enable the Google Docs API, rerun OAuth setup for the Docs scope, and verify the authorized account can create files in the Drive folder. |
 | `FFmpeg is not installed` | Use Docker or install FFmpeg locally and make sure `ffmpeg` is on `PATH`. |
+| YouTube download reports no supported JavaScript runtime | Use Docker or install Deno locally and make sure `deno` is on `PATH`. |
 | OpenAI transcription failed | Check `OPENAI_API_KEY`, audio file size, and `OPENAI_TRANSCRIPTION_MODEL`. Lower `MAX_AUDIO_SIZE_MB` only if your model limit is smaller. |
-| Instagram download failed | This is expected for some links. The row will be saved for manual review. Try a fresh Reel URL or set `ENABLE_VIDEO_DOWNLOAD=false` if you only want URL tracking. |
-| Instagram works locally but fails on Cloud Run | Add `INSTAGRAM_COOKIES_TEXT` from a private `cookies.txt` export, or upload the video directly to Telegram with the Reel URL in the caption. |
+| Provider download failed | This is expected for some links. The row will be saved for manual review. Try a fresh public video URL or set `ENABLE_VIDEO_DOWNLOAD=false` if you only want URL tracking. |
+| Provider works locally but fails on Cloud Run | Datacenter IPs are blocked more often. Try a different public URL, upload the video directly to Telegram, or intentionally enable cookie fallback with `ENABLE_AUTH_COOKIES=true`. |
 | Telegram upload fallback fails | Check `ENABLE_TELEGRAM_MEDIA_FALLBACK`, file size, and whether Telegram Bot API can provide the uploaded file. Try sending the media as a document if sending as video fails. |
 
 ## How the Workflow Handles Failures
 
-- Invalid or non-Reel URLs get a helpful Telegram reply.
+- Invalid or unsupported URLs get a helpful Telegram reply.
 - Unauthorized Telegram users are ignored when `TELEGRAM_ALLOWED_USER_ID` is set.
 - Google Sheets failures are logged; processing continues where possible.
-- Instagram download failures are expected and recorded as `download_failed` with manual review notes.
+- Provider download failures are expected and recorded as `download_failed` with manual review notes.
 - Google Drive upload failures do not stop transcription if the local file exists.
 - FFmpeg failures mark transcription as failed and leave the saved URL for manual review.
 - OpenAI transcription or analysis failures are logged, saved to Sheets when possible, and reported in Telegram.
 - Temporary files are cleaned after the local background job or Cloud Tasks request finishes.
 
-## Instagram Download Limitations
+## Provider Download Limitations
 
-Instagram can block automated downloads, require login, expire shared links, or rate limit requests. ReelVault treats this as normal operational behavior. If download fails, the system still saves the source URL and marks the row for manual review instead of crashing.
+YouTube, Instagram, TikTok, and X can block automated downloads, require login for specific content, expire shared links, change APIs, or rate limit requests. ReelVault treats this as normal operational behavior. If download fails, the system still saves the source URL and marks the row for manual review instead of crashing.
 
-This MVP does not include browser automation scraping and does not bypass Instagram access controls.
+This MVP does not include browser automation scraping and does not bypass provider access controls.
 
 ## Creator Rights Notes
 

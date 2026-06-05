@@ -42,6 +42,13 @@ class ReelReference(BaseModel):
     raw_url: str | None = None
     shortcode: str | None = None
     is_share_url: bool = False
+    provider: str = "instagram"
+
+    @property
+    def source_type(self) -> str:
+        if self.provider == "telegram":
+            return "telegram_upload"
+        return f"{self.provider}_url"
 
 
 class TelegramMediaReference(BaseModel):
@@ -264,7 +271,7 @@ class SheetRow(BaseModel):
 
     @classmethod
     def from_reel(cls, reel: ReelReference) -> "SheetRow":
-        return cls(reel_url=reel.url, shortcode=reel.shortcode or "")
+        return cls(reel_url=reel.url, shortcode=reel.shortcode or "", source_type=reel.source_type)
 
     @classmethod
     def from_telegram_media(cls, reel: ReelReference, media: TelegramMediaReference) -> "SheetRow":
@@ -324,6 +331,7 @@ class SheetRow(BaseModel):
             url=self.reel_url,
             shortcode=self.shortcode or None,
             is_share_url="/share/reel/" in self.reel_url,
+            provider=provider_from_source(self.source_type, self.reel_url),
         )
 
     def to_telegram_media_reference(self) -> TelegramMediaReference | None:
@@ -367,3 +375,17 @@ class SheetRow(BaseModel):
 def format_idea_for_sheet(idea: OriginalContentIdea) -> str:
     outline = "\n".join(f"- {line}" for line in idea.short_script_outline)
     return f"{idea.title}\nAngle: {idea.angle}\nHook: {idea.sample_hook}\nOutline:\n{outline}"
+
+
+def provider_from_source(source_type: str, url: str) -> str:
+    if source_type == "telegram_upload" or url.startswith("telegram-upload://"):
+        return "telegram"
+    if source_type.endswith("_url"):
+        return source_type.removesuffix("_url") or "instagram"
+    if "youtu.be" in url or "youtube.com" in url:
+        return "youtube"
+    if "tiktok.com" in url:
+        return "tiktok"
+    if "x.com" in url or "twitter.com" in url:
+        return "x"
+    return "instagram"

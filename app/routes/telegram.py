@@ -10,8 +10,8 @@ from app.models.schemas import (
     TelegramMediaReference,
 )
 from app.services.google_sheets_service import GoogleSheetsService
-from app.services.instagram_service import InstagramService
 from app.services.pillar_service import PillarParseKind, PillarService
+from app.services.social_video_service import SocialVideoService
 from app.services.task_queue_service import CloudTasksQueueService, is_uncertain_cloud_tasks_timeout
 from app.services.telegram_service import IncomingTelegramMedia, TelegramService
 from app.services.workflow_service import process_reel_inspiration
@@ -53,17 +53,16 @@ async def telegram_webhook(
         logger.warning("telegram_unauthorized_user", extra={"telegram_user_id": incoming.user_id})
         return {"ok": True, "queued": 0, "message": "Ignored unauthorized user"}
 
-    reels = InstagramService.extract_reel_urls(incoming.text)
+    reels = SocialVideoService.extract_supported_urls(incoming.text)
     if not reels:
         try:
             await telegram.send_message_async(
                 incoming.chat_id,
-                "Please send one or more Instagram Reel URLs, for example: "
-                "https://www.instagram.com/reel/SHORTCODE/",
+                "Please send one or more YouTube, Instagram, TikTok, or X video URLs.",
             )
         except Exception as exc:
             logger.warning("telegram_invalid_url_reply_failed", extra={"error": public_error_message(exc)})
-        return {"ok": True, "queued": 0, "message": "No reel URLs found"}
+        return {"ok": True, "queued": 0, "message": "No supported video URLs found"}
 
     pillar_result = PillarService.parse_message(incoming.text)
     if pillar_result.kind == PillarParseKind.AMBIGUOUS:
@@ -88,9 +87,9 @@ async def telegram_webhook(
         return {"ok": True, "queued": 0, "pending": pending_count}
 
     start_message = (
-        "Got it - saving this Reel inspiration now."
+        "Got it - saving this video inspiration now."
         if len(reels) == 1
-        else f"Got it - saving {len(reels)} Reel inspirations now."
+        else f"Got it - saving {len(reels)} video inspirations now."
     )
     try:
         await telegram.send_message_async(incoming.chat_id, start_message)
@@ -128,7 +127,7 @@ async def handle_media_upload(
     if not settings.enable_telegram_media_fallback:
         await telegram.send_message_async(
             incoming.chat_id,
-            "Telegram media fallback is disabled. Send an Instagram Reel URL instead.",
+            "Telegram media fallback is disabled. Send a supported video URL instead.",
         )
         return {"ok": True, "queued": 0, "message": "Telegram media fallback disabled"}
 
@@ -139,13 +138,13 @@ async def handle_media_upload(
         )
         return {"ok": True, "queued": 0, "message": "Telegram media too large"}
 
-    reels = InstagramService.extract_reel_urls(incoming.caption)
+    reels = SocialVideoService.extract_supported_urls(incoming.caption)
     if len(reels) > 1:
         await telegram.send_message_async(
             incoming.chat_id,
-            "Please send one uploaded video with at most one Instagram Reel URL in the caption.",
+            "Please send one uploaded video with at most one supported video URL in the caption.",
         )
-        return {"ok": True, "queued": 0, "message": "Multiple caption Reel URLs"}
+        return {"ok": True, "queued": 0, "message": "Multiple caption video URLs"}
 
     reel = reels[0] if reels else reel_reference_for_media_upload(incoming.media)
     pillar_result = PillarService.parse_message(incoming.caption)
@@ -176,7 +175,7 @@ async def handle_media_upload(
             return {"ok": True, "queued": 0, "message": "Pending media confirmation failed"}
 
     try:
-        await telegram.send_message_async(incoming.chat_id, "Got it - saving this uploaded Reel video now.")
+        await telegram.send_message_async(incoming.chat_id, "Got it - saving this uploaded video now.")
     except Exception as exc:
         logger.warning("telegram_media_start_reply_failed", extra={"error": public_error_message(exc)})
 
@@ -272,33 +271,33 @@ async def handle_pillar_callback(
             sheets.update_row(action.row_index, row)
         except Exception as exc:
             logger.warning("cancelled_row_update_failed", extra={"row_index": action.row_index, "error": public_error_message(exc)})
-        await acknowledge_callback_choice(telegram, callback.chat_id, callback.message_id, "Cancelled this Reel inspiration.")
+        await acknowledge_callback_choice(telegram, callback.chat_id, callback.message_id, "Cancelled this video inspiration.")
         return {"ok": True, "queued": 0, "message": "Cancelled"}
 
     media = row.to_telegram_media_reference()
-    reel = row.to_reel_reference() if media else InstagramService.normalize_reel_url(row.reel_url)
+    reel = row.to_reel_reference() if media else SocialVideoService.normalize_url(row.reel_url)
     if reel is None:
         row.status = ProcessingStatus.INVALID_URL.value
-        row.append_error("Stored pending row has an invalid Instagram Reel URL.")
+        row.append_error("Stored pending row has an invalid supported video URL.")
         try:
             sheets.update_row(action.row_index, row)
         except Exception as exc:
             logger.warning("invalid_pending_url_update_failed", extra={"row_index": action.row_index, "error": public_error_message(exc)})
-        await telegram.send_message_async(callback.chat_id, "That pending row does not have a valid Instagram Reel URL.")
-        return {"ok": True, "queued": 0, "message": "Invalid pending Reel URL"}
+        await telegram.send_message_async(callback.chat_id, "That pending row does not have a valid supported video URL.")
+        return {"ok": True, "queued": 0, "message": "Invalid pending video URL"}
 
     if action.action == "confirm" and action.pillar is not None:
         row.pillar = action.pillar.value
         row.pillar_source = "telegram_fuzzy_confirmed"
         row.pillar_confidence = "1.00"
-        confirmation_text = f"Using {action.pillar.value}. Saving this Reel inspiration now."
+        confirmation_text = f"Using {action.pillar.value}. Saving this video inspiration now."
         initial_pillar = action.pillar
         initial_pillar_source = "telegram_fuzzy_confirmed"
     else:
         row.pillar = ""
         row.pillar_source = "ai"
         row.pillar_confidence = ""
-        confirmation_text = "Letting AI classify this Reel. Saving this Reel inspiration now."
+        confirmation_text = "Letting AI classify this video. Saving this video inspiration now."
         initial_pillar = None
         initial_pillar_source = "ai"
 
@@ -408,7 +407,7 @@ async def enqueue_cloud_task(
             extra={"shortcode": reel.shortcode, "row_index": row_index, "error": error},
         )
         try:
-            await telegram.send_message_async(chat_id, f"I could not save this Reel before queueing it: {error}")
+            await telegram.send_message_async(chat_id, f"I could not save this video before queueing it: {error}")
         except Exception as send_exc:
             logger.warning("telegram_row_save_failure_reply_failed", extra={"error": public_error_message(send_exc)})
         return False
@@ -445,7 +444,7 @@ async def enqueue_cloud_task(
         except Exception as sheet_exc:
             logger.warning("queue_failed_row_update_failed", extra={"error": public_error_message(sheet_exc)})
         try:
-            await telegram.send_message_async(chat_id, f"I saved the Reel URL, but could not queue processing: {error}")
+            await telegram.send_message_async(chat_id, f"I saved the video URL, but could not queue processing: {error}")
         except Exception as send_exc:
             logger.warning("telegram_queue_failure_reply_failed", extra={"error": public_error_message(send_exc)})
         return False
@@ -472,4 +471,5 @@ def reel_reference_for_media_upload(media: TelegramMediaReference) -> ReelRefere
     return ReelReference(
         url=f"telegram-upload://{media_id}",
         shortcode=media_id[:32],
+        provider="telegram",
     )

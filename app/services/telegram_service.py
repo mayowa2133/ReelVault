@@ -211,7 +211,7 @@ class TelegramService:
     ) -> None:
         await self.send_message_async(
             chat_id,
-            f"Did you mean {pillar.value} for this Reel?\n{reel_url}",
+            f"Did you mean {pillar.value} for this video?\n{reel_url}",
             reply_markup={
                 "inline_keyboard": [
                     [
@@ -235,7 +235,7 @@ class TelegramService:
         )
 
     def build_completion_message(self, row: SheetRow, sheet_url: str | None) -> str:
-        lines = [f"Reel inspiration saved. Status: {row.status}"]
+        lines = [f"Video inspiration saved. Status: {row.status}"]
         if row.pillar:
             lines.append(f"\nPillar: {row.pillar}")
         if row.hook:
@@ -273,7 +273,7 @@ class TelegramService:
 
     def build_failure_message(self, row: SheetRow, sheet_url: str | None) -> str:
         lines = [
-            "I saved what I could, but this Reel needs manual review.",
+            "I saved what I could, but this video needs manual review.",
             f"Status: {row.status}",
         ]
         if sheet_url:
