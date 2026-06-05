@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from app.config import Settings
 from app.models.schemas import DownloadResult
@@ -33,20 +34,26 @@ class DownloaderService:
         options = self._yt_dlp_options(output_template, output_dir)
 
         try:
-            with yt_dlp.YoutubeDL(options) as ydl:
-                info = ydl.extract_info(url, download=True)
-                file_path = resolve_downloaded_path(info, output_dir, ydl)
+            info, file_path = self._download_with_options(url, output_dir, options)
         except Exception as exc:
             reason = public_error_message(exc)
-            logger.warning("reel_download_failed", extra={"error": reason})
-            return DownloadResult(
-                success=False,
-                status="download_failed",
-                error_message=(
-                    "Download failed. The platform may require login, block automated requests, "
-                    f"rate limit this link, or expose media that yt-dlp cannot access anonymously. Details: {reason}"
-                ),
-            )
+            if should_retry_youtube_without_webpage(url, reason):
+                try:
+                    fallback_options = self._youtube_no_auth_fallback_options(options)
+                    info, file_path = self._download_with_options(url, output_dir, fallback_options)
+                    logger.warning("youtube_download_succeeded_with_no_auth_fallback", extra={"url": url})
+                except Exception as fallback_exc:
+                    fallback_reason = public_error_message(fallback_exc)
+                    logger.warning(
+                        "reel_download_failed",
+                        extra={"error": reason, "fallback_error": fallback_reason},
+                    )
+                    return self._download_failed_result(
+                        f"{reason}. YouTube no-auth fallback also failed: {fallback_reason}"
+                    )
+            else:
+                logger.warning("reel_download_failed", extra={"error": reason})
+                return self._download_failed_result(reason)
 
         if not file_path or not file_path.exists():
             raise DownloadFailedError("yt-dlp reported success but no video file was found", step="download")
@@ -68,6 +75,21 @@ class DownloaderService:
             creator_username=extract_creator_username(info),
             title=safe_str(info.get("title")),
             metadata=metadata,
+        )
+
+    def _download_with_options(self, url: str, output_dir: Path, options: dict[str, Any]) -> tuple[dict[str, Any], Path | None]:
+        with yt_dlp.YoutubeDL(options) as ydl:
+            info = ydl.extract_info(url, download=True)
+            return info, resolve_downloaded_path(info, output_dir, ydl)
+
+    def _download_failed_result(self, reason: str) -> DownloadResult:
+        return DownloadResult(
+            success=False,
+            status="download_failed",
+            error_message=(
+                "Download failed. The platform may require login, block automated requests, "
+                f"rate limit this link, or expose media that yt-dlp cannot access anonymously. Details: {reason}"
+            ),
         )
 
     def _yt_dlp_options(self, output_template: str, output_dir: Path) -> dict[str, Any]:
@@ -94,6 +116,17 @@ class DownloaderService:
         if cookie_file:
             options["cookiefile"] = str(cookie_file)
         return options
+
+    def _youtube_no_auth_fallback_options(self, options: dict[str, Any]) -> dict[str, Any]:
+        fallback_options = dict(options)
+        fallback_options["extractor_args"] = {
+            **fallback_options.get("extractor_args", {}),
+            "youtube": {
+                "player_client": ["mweb"],
+                "player_skip": ["webpage", "configs"],
+            },
+        }
+        return fallback_options
 
     def _cookie_file(self, output_dir: Path) -> Path | None:
         if not self.settings.enable_auth_cookies:
@@ -161,3 +194,21 @@ def safe_str(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def should_retry_youtube_without_webpage(url: str, error_message: str) -> bool:
+    parsed = urlsplit(url)
+    host = parsed.netloc.lower().removeprefix("www.")
+    if host not in {"youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}:
+        return False
+
+    lowered = error_message.lower()
+    return any(
+        needle in lowered
+        for needle in (
+            "sign in to confirm",
+            "not a bot",
+            "use --cookies",
+            "use --cookies-from-browser",
+        )
+    )

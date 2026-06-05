@@ -335,6 +335,8 @@ Smoke test:
 
 ReelVault uses yt-dlp anonymously by default for public YouTube, Instagram Reel, TikTok, and X/Twitter video URLs. Old `INSTAGRAM_COOKIES_*` values are ignored unless `ENABLE_AUTH_COOKIES=true`, which prevents stale cookies from breaking public no-auth downloads.
 
+For YouTube bot-check responses, ReelVault automatically retries once with yt-dlp's mobile web player client while skipping the initial YouTube webpage/config requests. This can work around some Cloud Run datacenter IP challenges without cookies, but it is still not guaranteed for every URL.
+
 Some provider URLs can still fail because platforms rate limit datacenter IPs, change APIs, require login for specific content, or block anonymous access. ReelVault records these as `download_failed` and keeps the source URL for manual review instead of crashing the workflow.
 
 Optional cookie fallback:
