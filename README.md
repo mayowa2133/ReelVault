@@ -504,6 +504,17 @@ curl "$BASE_URL/health"
 
 The health response includes non-secret downloader diagnostics such as the deployed `yt_dlp_version`, retry/timeout settings, and whether optional fallbacks like Cobalt, proxy, impersonation, custom headers, custom extractor args, Visitor Data, or PO Token settings are configured.
 
+Test provider download from the deployed Cloud Run revision:
+
+```bash
+curl -X POST "$BASE_URL/diagnostics/download" \
+  -H "Content-Type: application/json" \
+  -H "X-ReelVault-Task-Secret: $TASK_REQUEST_SECRET" \
+  -d '{"url":"https://www.instagram.com/reel/DWuZeLziciR/"}'
+```
+
+This endpoint is protected by `TASK_REQUEST_SECRET`, downloads into temporary storage, deletes the file before responding, and does not write to Sheets, Drive, OpenAI, or Telegram. Use it to verify whether the currently deployed Cloud Run revision can anonymously download a specific YouTube, Instagram, or TikTok URL.
+
 ## Deployment
 
 ### Google Cloud Run

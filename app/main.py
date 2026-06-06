@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
+from app.routes.diagnostics import router as diagnostics_router
 from app.routes.sheets import router as sheets_router
 from app.routes.tasks import router as tasks_router
 from app.routes.telegram import router as telegram_router
@@ -22,6 +23,7 @@ app = FastAPI(
 app.include_router(telegram_router)
 app.include_router(tasks_router)
 app.include_router(sheets_router)
+app.include_router(diagnostics_router)
 
 
 @app.get("/health")

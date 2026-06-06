@@ -1,0 +1,76 @@
+from __future__ import annotations
+
+from pathlib import Path
+import tempfile
+
+from fastapi import APIRouter, Depends, Header, HTTPException
+from pydantic import BaseModel, Field
+
+from app.config import Settings, get_settings
+from app.services.downloader_service import DownloaderService, downloader_runtime_info
+from app.services.social_video_service import SocialVideoService
+from app.services.task_queue_service import TASK_SECRET_HEADER
+from app.utils.errors import public_error_message
+
+router = APIRouter(tags=["diagnostics"])
+
+
+class DownloadDiagnosticPayload(BaseModel):
+    url: str = Field(min_length=1)
+
+
+def require_task_secret(
+    x_reelvault_task_secret: str | None,
+    settings: Settings,
+) -> None:
+    if not settings.task_request_secret:
+        raise HTTPException(status_code=500, detail="TASK_REQUEST_SECRET is not configured")
+    if x_reelvault_task_secret != settings.task_request_secret:
+        raise HTTPException(status_code=401, detail="Invalid task secret")
+
+
+@router.post("/diagnostics/download")
+def download_diagnostic(
+    payload: DownloadDiagnosticPayload,
+    x_reelvault_task_secret: str | None = Header(default=None, alias=TASK_SECRET_HEADER),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    require_task_secret(x_reelvault_task_secret, settings)
+
+    reel = SocialVideoService.normalize_url(payload.url)
+    if not reel:
+        raise HTTPException(status_code=400, detail="Unsupported social video URL")
+
+    settings.temp_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="diagnostic-", dir=settings.temp_dir) as temp_dir:
+        output_dir = Path(temp_dir)
+        try:
+            result = DownloaderService(settings).download(reel.url, output_dir)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "provider": reel.provider,
+                "url": reel.url,
+                "raw_url": payload.url,
+                "status": "download_exception",
+                "error": public_error_message(exc),
+                "downloader": downloader_runtime_info(settings),
+            }
+
+        file_size_bytes = None
+        if result.file_path and result.file_path.exists():
+            file_size_bytes = result.file_path.stat().st_size
+
+        return {
+            "ok": result.success,
+            "provider": reel.provider,
+            "url": reel.url,
+            "raw_url": payload.url,
+            "status": result.status,
+            "title": result.title,
+            "creator_username": result.creator_username,
+            "file_size_bytes": file_size_bytes,
+            "metadata": result.metadata,
+            "error": result.error_message,
+            "downloader": downloader_runtime_info(settings),
+        }
