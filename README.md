@@ -357,7 +357,7 @@ Smoke test:
 
 ## Provider Downloads
 
-ReelVault uses yt-dlp anonymously by default for public YouTube, Instagram media, TikTok, and X/Twitter video URLs. Old `INSTAGRAM_COOKIES_*` values are ignored unless `ENABLE_AUTH_COOKIES=true`, which prevents stale cookies from breaking public no-auth downloads. The Docker build installs `yt-dlp[default,curl-cffi]` so extractors that request browser/TLS impersonation can use it.
+ReelVault uses yt-dlp anonymously by default for public YouTube, Instagram media, TikTok, and X/Twitter video URLs. Old `INSTAGRAM_COOKIES_*` values are ignored unless `ENABLE_AUTH_COOKIES=true`, which prevents stale cookies from breaking public no-auth downloads. The Docker build installs the pinned stable `yt-dlp[default,curl-cffi]` package, then upgrades to the official May 25, 2026 yt-dlp master snapshot by default so recent extractor/networking fixes are available before the next stable release.
 
 For YouTube bot-check responses, ReelVault automatically tries a no-auth fallback chain. It retries with yt-dlp's mobile web player client while skipping initial YouTube webpage/config requests, then tries explicit Android/iOS clients, broader YouTube client probing, anonymous YouTube Visitor Data, and Visitor Data retries while skipping the watch page and config requests. If `YOUTUBE_PO_TOKEN` is set, it also tries configured PO Token strategies. `YOUTUBE_FETCH_POT_POLICY`, `YOUTUBE_INCLUDE_MISSING_POT_FORMATS`, and `YOUTUBE_USE_AD_PLAYBACK_CONTEXT` expose the remaining yt-dlp YouTube PO-token knobs for controlled experiments. These paths follow yt-dlp's documented no-cookie Visitor Data and PO Token hooks. They can work around some Cloud Run datacenter IP challenges without account cookies, but they are still not guaranteed for every URL.
 
@@ -377,7 +377,7 @@ Some provider URLs can still fail because platforms rate limit datacenter IPs, c
 
 Build-time yt-dlp overrides:
 
-The default Docker build installs the pinned `yt-dlp[default,curl-cffi]` version from `requirements.txt`. If a provider breaks before the next pinned release, rebuild with a trusted override:
+The default Docker build installs the pinned `yt-dlp[default,curl-cffi]` version from `requirements.txt`, then applies `YT_DLP_PACKAGE_SPEC`, which defaults to the official yt-dlp source snapshot generated from `yt-dlp/yt-dlp@acf8ab7` in the May 25, 2026 master build. If a provider breaks before the next pinned release, rebuild with another trusted override:
 
 ```bash
 docker build \

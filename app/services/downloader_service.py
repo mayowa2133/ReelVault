@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
 import re
 import random
@@ -582,6 +583,7 @@ def downloader_runtime_info(settings: Settings) -> dict[str, Any]:
     return {
         "yt_dlp_available": yt_dlp is not None,
         "yt_dlp_version": version,
+        "yt_dlp_package_spec": os.getenv("REELVAULT_YT_DLP_PACKAGE_SPEC") or None,
         "auth_cookies_enabled": settings.enable_auth_cookies,
         "cobalt_configured": bool(settings.cobalt_api_base_url),
         "proxy_configured": bool(settings.social_download_proxy_url),

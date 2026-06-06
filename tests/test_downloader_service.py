@@ -13,6 +13,7 @@ from app.services.downloader_service import (
     should_retry_tiktok_with_mobile_api,
     should_try_cobalt_fallback,
     should_retry_youtube_without_webpage,
+    downloader_runtime_info,
     summarize_attempt_errors,
 )
 from app.services.cobalt_service import CobaltDownloadResult
@@ -128,6 +129,14 @@ def test_downloader_supports_any_impersonation_alias(tmp_path):
     options = service._yt_dlp_options(str(tmp_path / "%(id)s.%(ext)s"), tmp_path)
 
     assert str(options["impersonate"]) == ""
+
+
+def test_downloader_runtime_info_includes_package_spec(monkeypatch):
+    monkeypatch.setenv("REELVAULT_YT_DLP_PACKAGE_SPEC", "yt-dlp @ https://example.test/archive.tar.gz")
+
+    info = downloader_runtime_info(Settings())
+
+    assert info["yt_dlp_package_spec"] == "yt-dlp @ https://example.test/archive.tar.gz"
 
 
 def test_downloader_merges_custom_extractor_args_json(tmp_path):

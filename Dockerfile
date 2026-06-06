@@ -5,8 +5,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 ARG DENO_VERSION=2.3.6
-ARG YT_DLP_PACKAGE_SPEC=""
+ARG YT_DLP_PACKAGE_SPEC="yt-dlp[default,curl-cffi] @ https://github.com/yt-dlp/yt-dlp/archive/acf8ab7.tar.gz"
 ARG YT_DLP_PLUGIN_PACKAGE_SPECS=""
+
+ENV REELVAULT_YT_DLP_PACKAGE_SPEC="${YT_DLP_PACKAGE_SPEC}"
 
 WORKDIR /app
 
@@ -18,7 +20,7 @@ RUN apt-get update \
 COPY requirements.txt .
 RUN pip install --upgrade pip \
     && pip install -r requirements.txt \
-    && if [ -n "$YT_DLP_PACKAGE_SPEC" ]; then pip install --upgrade $YT_DLP_PACKAGE_SPEC; fi \
+    && if [ -n "$YT_DLP_PACKAGE_SPEC" ]; then pip install --upgrade "$YT_DLP_PACKAGE_SPEC"; fi \
     && if [ -n "$YT_DLP_PLUGIN_PACKAGE_SPECS" ]; then pip install $YT_DLP_PLUGIN_PACKAGE_SPECS; fi \
     && python -m yt_dlp --version
 
