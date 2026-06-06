@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import re
+import subprocess
 from typing import Any
 from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
@@ -23,10 +24,12 @@ class YoutubeMirrorDownloadResult:
 class MirrorStream:
     service: str
     url: str
+    audio_url: str | None
     title: str | None
     author: str | None
     quality: str | None
     extension: str = "mp4"
+    audio_extension: str = "m4a"
 
 
 class YoutubeMirrorService:
@@ -80,7 +83,7 @@ class YoutubeMirrorService:
         data = response.json()
         stream = select_piped_stream(data)
         if not stream:
-            raise DownloadFailedError("Piped response did not include a downloadable progressive MP4 stream", step="download")
+            raise DownloadFailedError("Piped response did not include downloadable media streams", step="download")
         return stream
 
     def _invidious_stream(self, client: httpx.Client, base_url: str, video_id: str) -> MirrorStream:
@@ -92,7 +95,7 @@ class YoutubeMirrorService:
         data = response.json()
         stream = select_invidious_stream(data)
         if not stream:
-            raise DownloadFailedError("Invidious response did not include a downloadable progressive MP4 stream", step="download")
+            raise DownloadFailedError("Invidious response did not include downloadable media streams", step="download")
         return stream
 
     def _download_stream(
@@ -104,12 +107,25 @@ class YoutubeMirrorService:
         output_dir: Path,
     ) -> YoutubeMirrorDownloadResult:
         file_path = unique_output_path(output_dir / safe_youtube_mirror_filename(video_id, stream.title, stream.extension))
-        download_media_stream(
-            client,
-            stream.url,
-            file_path,
-            max_bytes=self.settings.max_video_size_mb * 1024 * 1024,
-        )
+        max_bytes = self.settings.max_video_size_mb * 1024 * 1024
+
+        if stream.audio_url:
+            file_path = unique_output_path(file_path.with_suffix(".mkv"))
+            video_path = unique_output_path(output_dir / f"{video_id}.video.{stream.extension}")
+            audio_path = unique_output_path(output_dir / f"{video_id}.audio.{stream.audio_extension}")
+            try:
+                download_media_stream(client, stream.url, video_path, max_bytes=max_bytes)
+                remaining_bytes = max_bytes - video_path.stat().st_size
+                if remaining_bytes <= 0:
+                    raise DownloadFailedError("YouTube mirror audio/video streams exceeded MAX_VIDEO_SIZE_MB", step="download")
+                download_media_stream(client, stream.audio_url, audio_path, max_bytes=remaining_bytes)
+                merge_audio_video(video_path, audio_path, file_path, max_bytes=max_bytes)
+            finally:
+                video_path.unlink(missing_ok=True)
+                audio_path.unlink(missing_ok=True)
+        else:
+            download_media_stream(client, stream.url, file_path, max_bytes=max_bytes)
+
         return YoutubeMirrorDownloadResult(
             file_path=file_path,
             info={
@@ -167,39 +183,76 @@ def invidious_video_url(base_url: str, video_id: str, region: str) -> str:
 
 def select_piped_stream(data: dict[str, Any]) -> MirrorStream | None:
     streams = data.get("videoStreams") or []
-    candidates = [
+    progressive_candidates = [
         item
         for item in streams
         if item.get("url")
         and not truthy(item.get("videoOnly"))
         and is_mp4_stream(item)
     ]
-    if not candidates:
+    if progressive_candidates:
+        best = max(progressive_candidates, key=stream_height)
+        return MirrorStream(
+            service="piped",
+            url=str(best["url"]),
+            audio_url=None,
+            title=safe_str(data.get("title")),
+            author=safe_str(data.get("uploader") or data.get("author")),
+            quality=safe_str(best.get("quality") or best.get("qualityLabel")),
+            extension=stream_extension(best),
+        )
+
+    video_candidates = [item for item in streams if item.get("url") and truthy(item.get("videoOnly")) and is_video_stream(item)]
+    audio_candidates = [item for item in data.get("audioStreams") or [] if item.get("url") and is_audio_stream(item)]
+    if not video_candidates or not audio_candidates:
         return None
-    best = max(candidates, key=stream_height)
+
+    video = max(video_candidates, key=stream_height)
+    audio = max(audio_candidates, key=stream_bitrate)
     return MirrorStream(
         service="piped",
-        url=str(best["url"]),
+        url=str(video["url"]),
+        audio_url=str(audio["url"]),
         title=safe_str(data.get("title")),
         author=safe_str(data.get("uploader") or data.get("author")),
-        quality=safe_str(best.get("quality") or best.get("qualityLabel")),
-        extension=stream_extension(best),
+        quality=safe_str(video.get("quality") or video.get("qualityLabel")),
+        extension=stream_extension(video),
+        audio_extension=audio_extension(audio),
     )
 
 
 def select_invidious_stream(data: dict[str, Any]) -> MirrorStream | None:
     streams = data.get("formatStreams") or []
-    candidates = [item for item in streams if item.get("url") and is_mp4_stream(item)]
-    if not candidates:
+    progressive_candidates = [item for item in streams if item.get("url") and is_mp4_stream(item)]
+    if progressive_candidates:
+        best = max(progressive_candidates, key=stream_height)
+        return MirrorStream(
+            service="invidious",
+            url=str(best["url"]),
+            audio_url=None,
+            title=safe_str(data.get("title")),
+            author=safe_str(data.get("author") or data.get("uploader")),
+            quality=safe_str(best.get("qualityLabel") or best.get("quality")),
+            extension=stream_extension(best),
+        )
+
+    adaptive_streams = data.get("adaptiveFormats") or []
+    video_candidates = [item for item in adaptive_streams if item.get("url") and is_video_stream(item)]
+    audio_candidates = [item for item in adaptive_streams if item.get("url") and is_audio_stream(item)]
+    if not video_candidates or not audio_candidates:
         return None
-    best = max(candidates, key=stream_height)
+
+    video = max(video_candidates, key=stream_height)
+    audio = max(audio_candidates, key=stream_bitrate)
     return MirrorStream(
         service="invidious",
-        url=str(best["url"]),
+        url=str(video["url"]),
+        audio_url=str(audio["url"]),
         title=safe_str(data.get("title")),
         author=safe_str(data.get("author") or data.get("uploader")),
-        quality=safe_str(best.get("qualityLabel") or best.get("quality")),
-        extension=stream_extension(best),
+        quality=safe_str(video.get("qualityLabel") or video.get("quality")),
+        extension=stream_extension(video),
+        audio_extension=audio_extension(audio),
     )
 
 
@@ -211,11 +264,36 @@ def is_mp4_stream(item: dict[str, Any]) -> bool:
     return "mp4" in normalized or "mpeg4" in normalized
 
 
+def is_video_stream(item: dict[str, Any]) -> bool:
+    media_type = safe_str(item.get("mimeType") or item.get("type") or item.get("codec") or item.get("container") or item.get("format"))
+    if not media_type:
+        return True
+    lowered = media_type.lower()
+    return "video" in lowered or "avc" in lowered or "vp9" in lowered or "vp8" in lowered or "h264" in lowered
+
+
+def is_audio_stream(item: dict[str, Any]) -> bool:
+    media_type = safe_str(item.get("mimeType") or item.get("type") or item.get("codec") or item.get("container") or item.get("format"))
+    if not media_type:
+        return True
+    lowered = media_type.lower()
+    return "audio" in lowered or "mp4a" in lowered or "opus" in lowered or "vorbis" in lowered or "m4a" in lowered
+
+
 def stream_extension(item: dict[str, Any]) -> str:
     container = safe_str(item.get("container") or item.get("format") or item.get("mimeType") or item.get("type"))
     if container and "webm" in container.lower():
         return "webm"
     return "mp4"
+
+
+def audio_extension(item: dict[str, Any]) -> str:
+    container = safe_str(item.get("container") or item.get("format") or item.get("mimeType") or item.get("type"))
+    if container and "webm" in container.lower():
+        return "webm"
+    if container and "opus" in container.lower():
+        return "opus"
+    return "m4a"
 
 
 def stream_height(item: dict[str, Any]) -> int:
@@ -224,6 +302,17 @@ def stream_height(item: dict[str, Any]) -> int:
         if value is None:
             continue
         match = re.search(r"(\d{3,4})", str(value))
+        if match:
+            return int(match.group(1))
+    return 0
+
+
+def stream_bitrate(item: dict[str, Any]) -> int:
+    for key in ("bitrate", "quality"):
+        value = item.get(key)
+        if value is None:
+            continue
+        match = re.search(r"(\d+)", str(value))
         if match:
             return int(match.group(1))
     return 0
@@ -259,6 +348,48 @@ def download_media_stream(client: httpx.Client, url: str, file_path: Path, max_b
     if not file_path.exists() or file_path.stat().st_size == 0:
         file_path.unlink(missing_ok=True)
         raise DownloadFailedError("YouTube mirror returned an empty media file", step="download")
+
+
+def merge_audio_video(video_path: Path, audio_path: Path, output_path: Path, max_bytes: int) -> None:
+    try:
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(video_path),
+                "-i",
+                str(audio_path),
+                "-map",
+                "0:v:0",
+                "-map",
+                "1:a:0",
+                "-c",
+                "copy",
+                "-shortest",
+                str(output_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        output_path.unlink(missing_ok=True)
+        raise DownloadFailedError("FFmpeg is not installed or not on PATH", step="download") from exc
+    except subprocess.CalledProcessError as exc:
+        output_path.unlink(missing_ok=True)
+        detail = (exc.stderr or exc.stdout or "").strip()
+        raise DownloadFailedError(f"FFmpeg failed during YouTube mirror merge: {detail}", step="download") from exc
+
+    if not output_path.exists() or output_path.stat().st_size == 0:
+        output_path.unlink(missing_ok=True)
+        raise DownloadFailedError("YouTube mirror merge produced an empty media file", step="download")
+    if output_path.stat().st_size > max_bytes:
+        output_path.unlink(missing_ok=True)
+        raise DownloadFailedError("YouTube mirror merged file exceeded MAX_VIDEO_SIZE_MB", step="download")
 
 
 def mirror_headers() -> dict[str, str]:

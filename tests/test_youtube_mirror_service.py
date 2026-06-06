@@ -53,6 +53,40 @@ def test_select_piped_stream_prefers_best_progressive_mp4():
     assert stream.author == "jawed"
 
 
+def test_select_piped_stream_falls_back_to_adaptive_audio_video():
+    stream = select_piped_stream(
+        {
+            "title": "Me at the zoo",
+            "uploader": "jawed",
+            "videoStreams": [
+                {
+                    "url": "https://piped.example/video-720.mp4",
+                    "quality": "720p",
+                    "format": "MPEG_4",
+                    "mimeType": "video/mp4",
+                    "videoOnly": True,
+                }
+            ],
+            "audioStreams": [
+                {
+                    "url": "https://piped.example/audio.m4a",
+                    "quality": "128 kbps",
+                    "format": "M4A",
+                    "mimeType": "audio/mp4",
+                    "videoOnly": False,
+                }
+            ],
+        }
+    )
+
+    assert stream
+    assert stream.service == "piped"
+    assert stream.url == "https://piped.example/video-720.mp4"
+    assert stream.audio_url == "https://piped.example/audio.m4a"
+    assert stream.extension == "mp4"
+    assert stream.audio_extension == "m4a"
+
+
 def test_select_invidious_stream_prefers_best_mp4_format_stream():
     stream = select_invidious_stream(
         {
@@ -69,6 +103,35 @@ def test_select_invidious_stream_prefers_best_mp4_format_stream():
     assert stream.service == "invidious"
     assert stream.url == "https://invidious.example/720.mp4"
     assert stream.quality == "720p"
+
+
+def test_select_invidious_stream_falls_back_to_adaptive_audio_video():
+    stream = select_invidious_stream(
+        {
+            "title": "Me at the zoo",
+            "author": "jawed",
+            "formatStreams": [],
+            "adaptiveFormats": [
+                {
+                    "url": "https://invidious.example/video-720.mp4",
+                    "qualityLabel": "720p",
+                    "type": "video/mp4; codecs=\"avc1.64001F\"",
+                },
+                {
+                    "url": "https://invidious.example/audio.m4a",
+                    "bitrate": 128000,
+                    "type": "audio/mp4; codecs=\"mp4a.40.2\"",
+                },
+            ],
+        }
+    )
+
+    assert stream
+    assert stream.service == "invidious"
+    assert stream.url == "https://invidious.example/video-720.mp4"
+    assert stream.audio_url == "https://invidious.example/audio.m4a"
+    assert stream.extension == "mp4"
+    assert stream.audio_extension == "m4a"
 
 
 def test_safe_youtube_mirror_filename_sanitizes_title():
@@ -137,4 +200,86 @@ def test_youtube_mirror_service_downloads_piped_stream(tmp_path, monkeypatch):
     assert result.file_path.read_bytes() == b"video"
     assert result.info["id"] == "jNQXAC9IVRw"
     assert result.info["extractor"] == "youtube_mirror"
+    assert result.info["youtube_mirror_service"] == "piped"
+
+
+def test_youtube_mirror_service_merges_adaptive_piped_streams(tmp_path, monkeypatch):
+    class FakeResponse:
+        def __init__(self, data=None, chunks=None):
+            self._data = data or {}
+            self._chunks = chunks or []
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._data
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def iter_bytes(self):
+            return iter(self._chunks)
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def get(self, url, headers):
+            assert url == "https://piped.example/streams/jNQXAC9IVRw"
+            return FakeResponse(
+                {
+                    "title": "Me at the zoo",
+                    "uploader": "jawed",
+                    "videoStreams": [
+                        {
+                            "url": "https://media.example/video.mp4",
+                            "quality": "720p",
+                            "format": "MPEG_4",
+                            "mimeType": "video/mp4",
+                            "videoOnly": True,
+                        }
+                    ],
+                    "audioStreams": [
+                        {
+                            "url": "https://media.example/audio.m4a",
+                            "quality": "128 kbps",
+                            "format": "M4A",
+                            "mimeType": "audio/mp4",
+                        }
+                    ],
+                }
+            )
+
+        def stream(self, method, url, headers):
+            assert method == "GET"
+            chunks = {
+                "https://media.example/video.mp4": [b"video"],
+                "https://media.example/audio.m4a": [b"audio"],
+            }
+            return FakeResponse(chunks=chunks[url])
+
+    def fake_run(command, check, capture_output, text):
+        output_path = command[-1]
+        with open(output_path, "wb") as output_file:
+            output_file.write(b"merged")
+        return None
+
+    monkeypatch.setattr("app.services.youtube_mirror_service.httpx.Client", FakeClient)
+    monkeypatch.setattr("app.services.youtube_mirror_service.subprocess.run", fake_run)
+    service = YoutubeMirrorService(Settings(youtube_piped_api_base_urls="https://piped.example"))
+
+    result = service.download("https://www.youtube.com/watch?v=jNQXAC9IVRw", tmp_path)
+
+    assert result.file_path.suffix == ".mkv"
+    assert result.file_path.read_bytes() == b"merged"
     assert result.info["youtube_mirror_service"] == "piped"
