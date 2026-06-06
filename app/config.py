@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     instagram_cookies_text: str | None = None
     youtube_visitor_data: str | None = None
     youtube_po_token: str | None = None
+    social_download_proxy_url: str | None = None
+    yt_dlp_sleep_requests_seconds: float | None = None
+    yt_dlp_sleep_interval_seconds: float | None = None
+    yt_dlp_max_sleep_interval_seconds: float | None = None
     cobalt_api_base_url: str | None = None
     cobalt_api_key: str | None = None
     cobalt_video_quality: str = "720"
@@ -83,6 +87,7 @@ class Settings(BaseSettings):
         "instagram_cookies_text",
         "youtube_visitor_data",
         "youtube_po_token",
+        "social_download_proxy_url",
         "cobalt_api_base_url",
         "cobalt_api_key",
         mode="before",

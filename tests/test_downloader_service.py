@@ -50,6 +50,24 @@ def test_downloader_uses_legacy_instagram_cookies_file_when_explicitly_enabled(t
     assert options["cookiefile"] == str(cookie_file)
 
 
+def test_downloader_applies_proxy_and_sleep_options(tmp_path):
+    service = DownloaderService(
+        Settings(
+            social_download_proxy_url="socks5://user:pass@proxy.example:1080",
+            yt_dlp_sleep_requests_seconds=2.5,
+            yt_dlp_sleep_interval_seconds=3,
+            yt_dlp_max_sleep_interval_seconds=7,
+        )
+    )
+
+    options = service._yt_dlp_options(str(tmp_path / "%(id)s.%(ext)s"), tmp_path)
+
+    assert options["proxy"] == "socks5://user:pass@proxy.example:1080"
+    assert options["sleep_interval_requests"] == 2.5
+    assert options["sleep_interval"] == 3
+    assert options["max_sleep_interval"] == 7
+
+
 def test_youtube_no_auth_fallback_options_skip_webpage(tmp_path):
     service = DownloaderService(Settings())
     options = service._yt_dlp_options(str(tmp_path / "%(id)s.%(ext)s"), tmp_path)

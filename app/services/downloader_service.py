@@ -418,6 +418,15 @@ class DownloaderService:
             "http_headers": {"User-Agent": self._yt_dlp_user_agent()},
         }
 
+        if self.settings.social_download_proxy_url:
+            options["proxy"] = self.settings.social_download_proxy_url
+        if self.settings.yt_dlp_sleep_requests_seconds is not None:
+            options["sleep_interval_requests"] = self.settings.yt_dlp_sleep_requests_seconds
+        if self.settings.yt_dlp_sleep_interval_seconds is not None:
+            options["sleep_interval"] = self.settings.yt_dlp_sleep_interval_seconds
+            if self.settings.yt_dlp_max_sleep_interval_seconds is not None:
+                options["max_sleep_interval"] = self.settings.yt_dlp_max_sleep_interval_seconds
+
         cookie_file = self._cookie_file(output_dir)
         if cookie_file:
             options["cookiefile"] = str(cookie_file)
