@@ -5,6 +5,7 @@ from app.config import get_settings
 from app.routes.sheets import router as sheets_router
 from app.routes.tasks import router as tasks_router
 from app.routes.telegram import router as telegram_router
+from app.services.downloader_service import downloader_runtime_info
 from app.utils.errors import ReelVaultError, public_error_message
 from app.utils.logging import configure_logging, get_logger
 
@@ -24,8 +25,8 @@ app.include_router(sheets_router)
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health() -> dict[str, object]:
+    return {"status": "ok", "downloader": downloader_runtime_info(settings)}
 
 
 @app.exception_handler(ReelVaultError)

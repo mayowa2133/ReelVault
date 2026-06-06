@@ -367,6 +367,26 @@ If every built-in anonymous path fails and `COBALT_API_BASE_URL` is configured, 
 
 Some provider URLs can still fail because platforms rate limit datacenter IPs, change APIs, require login for specific content, or block anonymous access. ReelVault records these as `download_failed` and keeps the source URL for manual review instead of crashing the workflow.
 
+Build-time yt-dlp overrides:
+
+The default Docker build installs the pinned `yt-dlp[default,curl-cffi]` version from `requirements.txt`. If a provider breaks before the next pinned release, rebuild with a trusted override:
+
+```bash
+docker build \
+  --build-arg 'YT_DLP_PACKAGE_SPEC=--pre yt-dlp[default,curl-cffi]' \
+  -t reelvault .
+```
+
+You can also install trusted yt-dlp plugin packages at build time:
+
+```bash
+docker build \
+  --build-arg 'YT_DLP_PLUGIN_PACKAGE_SPECS=bgutil-ytdlp-pot-provider' \
+  -t reelvault .
+```
+
+Only install packages you trust. PO Token provider plugins can improve YouTube reliability, but they add third-party code and may require their own runtime services or browser infrastructure.
+
 Optional cookie fallback:
 
 1. Export a trusted Netscape-format `cookies.txt` only if you need authenticated access for content you are allowed to view.
@@ -467,6 +487,14 @@ Check webhook status:
 ```bash
 curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getWebhookInfo"
 ```
+
+Check deployed runtime status:
+
+```bash
+curl "$BASE_URL/health"
+```
+
+The health response includes non-secret downloader diagnostics such as the deployed `yt_dlp_version` and whether optional fallbacks like Cobalt, proxy, impersonation, custom extractor args, Visitor Data, or PO Token settings are configured.
 
 ## Deployment
 

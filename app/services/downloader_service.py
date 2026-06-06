@@ -549,6 +549,25 @@ class DownloaderService:
         )
 
 
+def downloader_runtime_info(settings: Settings) -> dict[str, Any]:
+    version = None
+    if yt_dlp is not None:
+        version = getattr(getattr(yt_dlp, "version", None), "__version__", None)
+
+    return {
+        "yt_dlp_available": yt_dlp is not None,
+        "yt_dlp_version": version,
+        "auth_cookies_enabled": settings.enable_auth_cookies,
+        "cobalt_configured": bool(settings.cobalt_api_base_url),
+        "proxy_configured": bool(settings.social_download_proxy_url),
+        "impersonation_configured": bool(settings.yt_dlp_impersonate_client),
+        "custom_extractor_args_configured": bool(settings.social_extractor_args_json),
+        "youtube_visitor_data_configured": bool(settings.youtube_visitor_data),
+        "youtube_po_token_configured": bool(settings.youtube_po_token),
+        "youtube_fetch_pot_policy": settings.youtube_fetch_pot_policy,
+    }
+
+
 def resolve_downloaded_path(info: dict[str, Any], output_dir: Path, ydl: Any) -> Path | None:
     requested_downloads = info.get("requested_downloads") or []
     for item in requested_downloads:
