@@ -3,6 +3,7 @@ from app.services.downloader_service import (
     DownloaderService,
     YOUTUBE_FALLBACK_FORMAT,
     YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES,
+    fetch_anonymous_youtube_visitor_data,
     should_retry_youtube_without_webpage,
     summarize_attempt_errors,
 )
@@ -67,6 +68,21 @@ def test_youtube_all_clients_fallback_skips_video_webpage(tmp_path):
         "player_skip": ["webpage"],
     }
     assert fallback["format"] == YOUTUBE_FALLBACK_FORMAT
+
+
+def test_youtube_visitor_data_fallback_uses_configured_visitor_data(tmp_path):
+    service = DownloaderService(Settings(youtube_visitor_data="VISITOR123"))
+    options = service._yt_dlp_options(str(tmp_path / "%(id)s.%(ext)s"), tmp_path)
+    strategy = next(item for item in YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES if item.name == "default_clients_with_visitor_data")
+
+    fallback = service._youtube_no_auth_fallback_options(options, strategy, service._youtube_visitor_data())
+
+    assert fallback["extractor_args"]["youtube"] == {
+        "player_client": ["default"],
+        "player_skip": ["webpage", "configs"],
+        "visitor_data": ["VISITOR123"],
+    }
+    assert "cookiefile" not in fallback
 
 
 def test_youtube_bot_error_is_retryable():
@@ -138,6 +154,32 @@ def test_downloader_continues_to_all_clients_fallback_after_mweb_failure(tmp_pat
     assert calls[2]["extractor_args"]["youtube"]["player_skip"] == ["webpage"]
 
 
+def test_downloader_uses_visitor_data_fallback_after_non_visitor_failures(tmp_path, monkeypatch):
+    service = DownloaderService(Settings(youtube_visitor_data="VISITOR123"))
+    calls = []
+    output_file = tmp_path / "video.mp4"
+    output_file.write_bytes(b"video")
+
+    def fake_download(url, output_dir, options):
+        calls.append(options)
+        if len(calls) <= 4:
+            raise RuntimeError("Sign in to confirm you're not a bot")
+        return {"id": "jNQXAC9IVRw", "title": "Me at the zoo", "uploader": "jawed"}, output_file
+
+    monkeypatch.setattr(service, "_download_with_options", fake_download)
+
+    result = service.download("https://www.youtube.com/watch?v=jNQXAC9IVRw", tmp_path)
+
+    assert result.success is True
+    assert result.file_path == output_file
+    assert len(calls) == 5
+    assert calls[4]["extractor_args"]["youtube"] == {
+        "player_client": ["default"],
+        "player_skip": ["webpage", "configs"],
+        "visitor_data": ["VISITOR123"],
+    }
+
+
 def test_downloader_reports_all_youtube_fallback_failures(tmp_path, monkeypatch):
     service = DownloaderService(Settings())
 
@@ -161,3 +203,31 @@ def test_summarize_attempt_errors_truncates_long_reasons():
     assert summary.startswith("strategy: ")
     assert summary.endswith("...")
     assert len(summary) < 320
+
+
+def test_fetch_anonymous_youtube_visitor_data_parses_homepage(monkeypatch):
+    class FakeResponse:
+        text = '{"VISITOR_DATA":"VISITOR123"}'
+
+        def raise_for_status(self):
+            return None
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def get(self, url):
+            assert url == "https://www.youtube.com/"
+            return FakeResponse()
+
+    monkeypatch.setattr("app.services.downloader_service.httpx.Client", FakeClient)
+
+    visitor_data = fetch_anonymous_youtube_visitor_data(timeout_seconds=3, user_agent="UA")
+
+    assert visitor_data == "VISITOR123"

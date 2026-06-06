@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from typing import Any
 from urllib.parse import urlsplit
+
+import httpx
 
 from app.config import Settings
 from app.models.schemas import DownloadResult
@@ -23,6 +26,7 @@ class YoutubeNoAuthFallbackStrategy:
     name: str
     youtube_args: dict[str, list[str]]
     format_selector: str | None = None
+    use_visitor_data: bool = False
 
 
 YOUTUBE_FALLBACK_FORMAT = "18/best[ext=mp4]/bestvideo+bestaudio/best"
@@ -50,6 +54,24 @@ YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES = (
             "player_skip": ["webpage", "configs"],
         },
         format_selector=YOUTUBE_FALLBACK_FORMAT,
+    ),
+    YoutubeNoAuthFallbackStrategy(
+        name="default_clients_with_visitor_data",
+        youtube_args={
+            "player_client": ["default"],
+            "player_skip": ["webpage", "configs"],
+        },
+        format_selector=YOUTUBE_FALLBACK_FORMAT,
+        use_visitor_data=True,
+    ),
+    YoutubeNoAuthFallbackStrategy(
+        name="all_clients_with_visitor_data",
+        youtube_args={
+            "player_client": ["all"],
+            "player_skip": ["webpage", "configs"],
+        },
+        format_selector=YOUTUBE_FALLBACK_FORMAT,
+        use_visitor_data=True,
     ),
     YoutubeNoAuthFallbackStrategy(
         name="web_safari_no_webpage_configs",
@@ -140,10 +162,21 @@ class DownloaderService:
         initial_reason: str,
     ) -> tuple[dict[str, Any], Path | None, str | None]:
         attempt_errors = [("default", initial_reason)]
+        youtube_visitor_data: str | None = None
 
         for strategy in YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES:
             try:
-                fallback_options = self._youtube_no_auth_fallback_options(options, strategy)
+                if strategy.use_visitor_data:
+                    youtube_visitor_data = youtube_visitor_data or self._youtube_visitor_data()
+                    if not youtube_visitor_data:
+                        attempt_errors.append((strategy.name, "anonymous YouTube Visitor Data was unavailable"))
+                        logger.warning(
+                            "youtube_no_auth_fallback_skipped",
+                            extra={"url": url, "strategy": strategy.name, "reason": "visitor_data_unavailable"},
+                        )
+                        continue
+
+                fallback_options = self._youtube_no_auth_fallback_options(options, strategy, youtube_visitor_data)
                 info, file_path = self._download_with_options(url, output_dir, fallback_options)
                 logger.warning(
                     "youtube_download_succeeded_with_no_auth_fallback",
@@ -176,12 +209,7 @@ class DownloaderService:
             "cachedir": False,
             "retries": 1,
             "socket_timeout": 30,
-            "http_headers": {
-                "User-Agent": (
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-                )
-            },
+            "http_headers": {"User-Agent": self._yt_dlp_user_agent()},
         }
 
         cookie_file = self._cookie_file(output_dir)
@@ -193,11 +221,14 @@ class DownloaderService:
         self,
         options: dict[str, Any],
         strategy: YoutubeNoAuthFallbackStrategy = YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES[0],
+        visitor_data: str | None = None,
     ) -> dict[str, Any]:
         fallback_options = dict(options)
         extractor_args = dict(fallback_options.get("extractor_args") or {})
         youtube_args = dict(extractor_args.get("youtube") or {})
         youtube_args.update(strategy.youtube_args)
+        if strategy.use_visitor_data and visitor_data:
+            youtube_args["visitor_data"] = [visitor_data]
         extractor_args["youtube"] = youtube_args
         fallback_options["extractor_args"] = {
             **extractor_args,
@@ -205,6 +236,19 @@ class DownloaderService:
         if strategy.format_selector:
             fallback_options["format"] = strategy.format_selector
         return fallback_options
+
+    def _youtube_visitor_data(self) -> str | None:
+        if self.settings.youtube_visitor_data:
+            return self.settings.youtube_visitor_data
+
+        try:
+            return fetch_anonymous_youtube_visitor_data(
+                timeout_seconds=self.settings.request_timeout_seconds,
+                user_agent=self._yt_dlp_user_agent(),
+            )
+        except Exception as exc:
+            logger.warning("youtube_visitor_data_fetch_failed", extra={"error": public_error_message(exc)})
+            return None
 
     def _cookie_file(self, output_dir: Path) -> Path | None:
         if not self.settings.enable_auth_cookies:
@@ -224,6 +268,12 @@ class DownloaderService:
                 return cookie_file
             logger.warning("social_cookies_file_missing", extra={"path": str(cookie_file)})
         return None
+
+    def _yt_dlp_user_agent(self) -> str:
+        return (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+        )
 
 
 def resolve_downloaded_path(info: dict[str, Any], output_dir: Path, ydl: Any) -> Path | None:
@@ -272,6 +322,22 @@ def safe_str(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def fetch_anonymous_youtube_visitor_data(timeout_seconds: int, user_agent: str) -> str | None:
+    headers = {"User-Agent": user_agent}
+    with httpx.Client(timeout=timeout_seconds, follow_redirects=True, headers=headers) as client:
+        response = client.get("https://www.youtube.com/")
+        response.raise_for_status()
+
+    for pattern in (
+        r'"visitorData"\s*:\s*"([^"]+)"',
+        r'"VISITOR_DATA"\s*:\s*"([^"]+)"',
+    ):
+        match = re.search(pattern, response.text)
+        if match:
+            return match.group(1)
+    return None
 
 
 def summarize_attempt_errors(attempt_errors: list[tuple[str, str]]) -> str:

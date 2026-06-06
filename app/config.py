@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     social_cookies_text: str | None = None
     instagram_cookies_file: str | None = None
     instagram_cookies_text: str | None = None
+    youtube_visitor_data: str | None = None
     enable_debug_logging: bool = False
 
     request_timeout_seconds: int = 30
@@ -75,6 +76,7 @@ class Settings(BaseSettings):
         "social_cookies_text",
         "instagram_cookies_file",
         "instagram_cookies_text",
+        "youtube_visitor_data",
         mode="before",
     )
     @classmethod

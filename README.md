@@ -120,6 +120,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `SOCIAL_COOKIES_TEXT` | Optional full contents of `cookies.txt`, useful as a Cloud Run Secret Manager value when `ENABLE_AUTH_COOKIES=true`. |
 | `INSTAGRAM_COOKIES_FILE` | Legacy alias for `SOCIAL_COOKIES_FILE`; ignored unless `ENABLE_AUTH_COOKIES=true`. |
 | `INSTAGRAM_COOKIES_TEXT` | Legacy alias for `SOCIAL_COOKIES_TEXT`; ignored unless `ENABLE_AUTH_COOKIES=true`. |
+| `YOUTUBE_VISITOR_DATA` | Optional anonymous YouTube Visitor Data override for no-cookie YouTube fallback. Usually unset; ReelVault fetches Visitor Data automatically when needed. |
 | `ENABLE_DEBUG_LOGGING` | Enables verbose structured JSON logs. |
 
 ## Telegram Bot Setup
@@ -335,7 +336,7 @@ Smoke test:
 
 ReelVault uses yt-dlp anonymously by default for public YouTube, Instagram Reel, TikTok, and X/Twitter video URLs. Old `INSTAGRAM_COOKIES_*` values are ignored unless `ENABLE_AUTH_COOKIES=true`, which prevents stale cookies from breaking public no-auth downloads.
 
-For YouTube bot-check responses, ReelVault automatically tries a short no-auth fallback chain. It first retries with yt-dlp's mobile web player client while skipping the initial YouTube webpage/config requests, then tries broader YouTube client probing while skipping the bot-checked watch page and preferring small combined MP4 formats. This can work around some Cloud Run datacenter IP challenges without cookies, but it is still not guaranteed for every URL.
+For YouTube bot-check responses, ReelVault automatically tries a short no-auth fallback chain. It first retries with yt-dlp's mobile web player client while skipping the initial YouTube webpage/config requests, then tries broader YouTube client probing while skipping the bot-checked watch page and preferring small combined MP4 formats. If those fail, it fetches anonymous YouTube Visitor Data and retries while skipping the watch page and config requests, which follows yt-dlp's documented no-cookie Visitor Data path. This can work around some Cloud Run datacenter IP challenges without cookies, but it is still not guaranteed for every URL.
 
 If every anonymous YouTube client path is blocked from the Cloud Run IP, the next non-cookie option is a yt-dlp PO Token provider. PO Tokens are short-lived playback attestation tokens, not account cookies, but they require extra runtime dependencies and may need per-video refreshes as YouTube changes enforcement.
 
@@ -599,7 +600,7 @@ The included tests cover social video URL extraction, Telegram pillar parsing/ca
 | YouTube download reports no supported JavaScript runtime | Use Docker or install Deno locally and make sure `deno` is on `PATH`. |
 | OpenAI transcription failed | Check `OPENAI_API_KEY`, audio file size, and `OPENAI_TRANSCRIPTION_MODEL`. Lower `MAX_AUDIO_SIZE_MB` only if your model limit is smaller. |
 | Provider download failed | This is expected for some links. The row will be saved for manual review. Try a fresh public video URL or set `ENABLE_VIDEO_DOWNLOAD=false` if you only want URL tracking. |
-| Provider works locally but fails on Cloud Run | Datacenter IPs are blocked more often. ReelVault retries several no-cookie YouTube client paths automatically, but some links may still need Telegram upload fallback, a yt-dlp PO Token provider, or intentionally enabled cookie fallback with `ENABLE_AUTH_COOKIES=true`. |
+| Provider works locally but fails on Cloud Run | Datacenter IPs are blocked more often. ReelVault retries several no-cookie YouTube client paths and anonymous Visitor Data automatically, but some links may still need Telegram upload fallback, a yt-dlp PO Token provider, changed network egress, or intentionally enabled cookie fallback with `ENABLE_AUTH_COOKIES=true`. |
 | Telegram upload fallback fails | Check `ENABLE_TELEGRAM_MEDIA_FALLBACK`, file size, and whether Telegram Bot API can provide the uploaded file. Try sending the media as a document if sending as video fails. |
 
 ## How the Workflow Handles Failures
