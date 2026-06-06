@@ -69,6 +69,37 @@ def test_downloader_applies_proxy_and_sleep_options(tmp_path):
     assert options["max_sleep_interval"] == 7
 
 
+def test_downloader_applies_retry_timeout_and_header_options(tmp_path):
+    service = DownloaderService(
+        Settings(
+            social_download_user_agent="Custom UA",
+            social_download_accept_language="en-US,en;q=0.9",
+            yt_dlp_retries=4,
+            yt_dlp_extractor_retries=5,
+            yt_dlp_fragment_retries=6,
+            yt_dlp_file_access_retries=7,
+            yt_dlp_retry_sleep_seconds=1.5,
+            yt_dlp_socket_timeout_seconds=45,
+        )
+    )
+
+    options = service._yt_dlp_options(str(tmp_path / "%(id)s.%(ext)s"), tmp_path)
+
+    assert options["http_headers"] == {
+        "User-Agent": "Custom UA",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    assert options["retries"] == 4
+    assert options["extractor_retries"] == 5
+    assert options["fragment_retries"] == 6
+    assert options["file_access_retries"] == 7
+    assert options["socket_timeout"] == 45
+    assert options["retry_sleep_functions"]["http"](1) == 1.5
+    assert options["retry_sleep_functions"]["fragment"](2) == 1.5
+    assert options["retry_sleep_functions"]["file_access"](3) == 1.5
+    assert options["retry_sleep_functions"]["extractor"](4) == 1.5
+
+
 def test_downloader_applies_impersonation_source_address_and_youtube_extractor_options(tmp_path):
     service = DownloaderService(
         Settings(

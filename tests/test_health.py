@@ -12,3 +12,5 @@ def test_health_includes_downloader_runtime_info():
     assert body["downloader"]["yt_dlp_available"] is True
     assert body["downloader"]["yt_dlp_version"]
     assert "cobalt_configured" in body["downloader"]
+    assert "yt_dlp_retries" in body["downloader"]
+    assert "yt_dlp_socket_timeout_seconds" in body["downloader"]

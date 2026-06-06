@@ -416,9 +416,9 @@ class DownloaderService:
             "no_warnings": True,
             "noprogress": True,
             "cachedir": False,
-            "retries": 1,
-            "socket_timeout": 30,
-            "http_headers": {"User-Agent": self._yt_dlp_user_agent()},
+            "retries": self.settings.yt_dlp_retries,
+            "socket_timeout": self.settings.yt_dlp_socket_timeout_seconds,
+            "http_headers": self._yt_dlp_headers(),
         }
 
         extractor_args = self._configured_extractor_args()
@@ -432,6 +432,14 @@ class DownloaderService:
             impersonate = yt_dlp_impersonate_value(self.settings.yt_dlp_impersonate_client)
             if impersonate:
                 options["impersonate"] = impersonate
+        if self.settings.yt_dlp_extractor_retries is not None:
+            options["extractor_retries"] = self.settings.yt_dlp_extractor_retries
+        if self.settings.yt_dlp_fragment_retries is not None:
+            options["fragment_retries"] = self.settings.yt_dlp_fragment_retries
+        if self.settings.yt_dlp_file_access_retries is not None:
+            options["file_access_retries"] = self.settings.yt_dlp_file_access_retries
+        if self.settings.yt_dlp_retry_sleep_seconds is not None:
+            options["retry_sleep_functions"] = retry_sleep_functions(self.settings.yt_dlp_retry_sleep_seconds)
         if self.settings.yt_dlp_sleep_requests_seconds is not None:
             options["sleep_interval_requests"] = self.settings.yt_dlp_sleep_requests_seconds
         if self.settings.yt_dlp_sleep_interval_seconds is not None:
@@ -443,6 +451,12 @@ class DownloaderService:
         if cookie_file:
             options["cookiefile"] = str(cookie_file)
         return options
+
+    def _yt_dlp_headers(self) -> dict[str, str]:
+        headers = {"User-Agent": self._yt_dlp_user_agent()}
+        if self.settings.social_download_accept_language:
+            headers["Accept-Language"] = self.settings.social_download_accept_language
+        return headers
 
     def _configured_extractor_args(self) -> dict[str, dict[str, list[str]]]:
         youtube_args: dict[str, list[str]] = {}
@@ -543,6 +557,9 @@ class DownloaderService:
         return None
 
     def _yt_dlp_user_agent(self) -> str:
+        if self.settings.social_download_user_agent:
+            return self.settings.social_download_user_agent
+
         return (
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
@@ -565,6 +582,14 @@ def downloader_runtime_info(settings: Settings) -> dict[str, Any]:
         "youtube_visitor_data_configured": bool(settings.youtube_visitor_data),
         "youtube_po_token_configured": bool(settings.youtube_po_token),
         "youtube_fetch_pot_policy": settings.youtube_fetch_pot_policy,
+        "custom_user_agent_configured": bool(settings.social_download_user_agent),
+        "custom_accept_language_configured": bool(settings.social_download_accept_language),
+        "yt_dlp_retries": settings.yt_dlp_retries,
+        "yt_dlp_extractor_retries": settings.yt_dlp_extractor_retries,
+        "yt_dlp_fragment_retries": settings.yt_dlp_fragment_retries,
+        "yt_dlp_file_access_retries": settings.yt_dlp_file_access_retries,
+        "yt_dlp_retry_sleep_configured": settings.yt_dlp_retry_sleep_seconds is not None,
+        "yt_dlp_socket_timeout_seconds": settings.yt_dlp_socket_timeout_seconds,
     }
 
 
@@ -715,6 +740,18 @@ def yt_dlp_impersonate_value(value: str) -> Any | None:
     except ValueError as exc:
         logger.warning("invalid_yt_dlp_impersonate_client", extra={"value": value, "error": str(exc)})
         return None
+
+
+def retry_sleep_functions(seconds: float) -> dict[str, Any]:
+    def sleep_func(_: int) -> float:
+        return seconds
+
+    return {
+        "http": sleep_func,
+        "fragment": sleep_func,
+        "file_access": sleep_func,
+        "extractor": sleep_func,
+    }
 
 
 def tiktok_app_info(strategy: TikTokNoAuthFallbackStrategy) -> str:

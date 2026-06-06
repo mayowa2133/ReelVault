@@ -61,8 +61,16 @@ class Settings(BaseSettings):
     youtube_use_ad_playback_context: bool = False
     social_download_proxy_url: str | None = None
     social_download_source_address: str | None = None
+    social_download_user_agent: str | None = None
+    social_download_accept_language: str | None = None
     social_extractor_args_json: str | None = None
     yt_dlp_impersonate_client: str | None = None
+    yt_dlp_retries: int = 1
+    yt_dlp_extractor_retries: int | None = None
+    yt_dlp_fragment_retries: int | None = None
+    yt_dlp_file_access_retries: int | None = None
+    yt_dlp_retry_sleep_seconds: float | None = None
+    yt_dlp_socket_timeout_seconds: int = 30
     yt_dlp_sleep_requests_seconds: float | None = None
     yt_dlp_sleep_interval_seconds: float | None = None
     yt_dlp_max_sleep_interval_seconds: float | None = None
@@ -96,6 +104,8 @@ class Settings(BaseSettings):
         "youtube_fetch_pot_policy",
         "social_download_proxy_url",
         "social_download_source_address",
+        "social_download_user_agent",
+        "social_download_accept_language",
         "social_extractor_args_json",
         "yt_dlp_impersonate_client",
         "cobalt_api_base_url",

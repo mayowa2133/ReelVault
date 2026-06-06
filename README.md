@@ -127,8 +127,16 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `YOUTUBE_USE_AD_PLAYBACK_CONTEXT` | Set `true` to pass yt-dlp's YouTube `use_ad_playback_context` extractor argument. Experimental and off by default. |
 | `SOCIAL_DOWNLOAD_PROXY_URL` | Optional HTTP/HTTPS/SOCKS proxy URL passed to yt-dlp. Use only with infrastructure you operate or are allowed to use. |
 | `SOCIAL_DOWNLOAD_SOURCE_ADDRESS` | Optional local source address passed to yt-dlp. Mostly useful for forcing IPv4/IPv6 behavior in environments that support it. |
+| `SOCIAL_DOWNLOAD_USER_AGENT` | Optional User-Agent override for yt-dlp requests. Defaults to a desktop Chrome-like value. |
+| `SOCIAL_DOWNLOAD_ACCEPT_LANGUAGE` | Optional `Accept-Language` header for yt-dlp requests, for example `en-US,en;q=0.9`. |
 | `SOCIAL_EXTRACTOR_ARGS_JSON` | Optional JSON object merged into yt-dlp `extractor_args`, for example `{"instagram":{"app_id":["936619743392459"]}}`. |
 | `YT_DLP_IMPERSONATE_CLIENT` | Optional yt-dlp request impersonation target such as `chrome`, `chrome-120`, `safari`, or `any`. Requires `curl-cffi`, included by this Docker build. |
+| `YT_DLP_RETRIES` | yt-dlp media download retry count, defaults to `1`. |
+| `YT_DLP_EXTRACTOR_RETRIES` | Optional yt-dlp extractor retry count for known extractor errors. |
+| `YT_DLP_FRAGMENT_RETRIES` | Optional yt-dlp fragment retry count for segmented media. |
+| `YT_DLP_FILE_ACCESS_RETRIES` | Optional yt-dlp file access retry count. |
+| `YT_DLP_RETRY_SLEEP_SECONDS` | Optional fixed sleep between yt-dlp retry attempts for HTTP, fragment, file access, and extractor retries. |
+| `YT_DLP_SOCKET_TIMEOUT_SECONDS` | yt-dlp socket timeout, defaults to `30`. |
 | `YT_DLP_SLEEP_REQUESTS_SECONDS` | Optional delay between yt-dlp extraction requests. Useful when public guest sessions hit rate limits. |
 | `YT_DLP_SLEEP_INTERVAL_SECONDS` | Optional minimum delay before each yt-dlp media download. |
 | `YT_DLP_MAX_SLEEP_INTERVAL_SECONDS` | Optional maximum randomized delay before each yt-dlp media download. Used only when `YT_DLP_SLEEP_INTERVAL_SECONDS` is set. |
@@ -355,7 +363,7 @@ For YouTube bot-check responses, ReelVault automatically tries a no-auth fallbac
 
 For TikTok failures, ReelVault retries yt-dlp with TikTok's mobile API extractor arguments: generated install/device IDs, alternate app profiles, and alternate API hostnames. For Instagram failures, ReelVault retries common URL variants (`/reel/`, `/reels/`, `/p/`, and embed URLs) and resolves `instagram.com/share/reel/...` redirects before retrying. These are anonymous public-media fallbacks; private, follower-only, expired, removed, or login-only content will still fail.
 
-If the problem is Cloud Run egress, browser/TLS fingerprinting, or request pacing rather than content access, set `SOCIAL_DOWNLOAD_PROXY_URL`, `YT_DLP_IMPERSONATE_CLIENT`, `SOCIAL_DOWNLOAD_SOURCE_ADDRESS`, and/or the `YT_DLP_SLEEP_*` values. A proxy is not authentication; it only changes where yt-dlp's anonymous public requests originate. Use infrastructure you operate or have permission to use, and expect paid bandwidth if you use a proxy provider.
+If the problem is Cloud Run egress, browser/TLS fingerprinting, transient provider errors, or request pacing rather than content access, set `SOCIAL_DOWNLOAD_PROXY_URL`, `YT_DLP_IMPERSONATE_CLIENT`, `SOCIAL_DOWNLOAD_SOURCE_ADDRESS`, `SOCIAL_DOWNLOAD_USER_AGENT`, `SOCIAL_DOWNLOAD_ACCEPT_LANGUAGE`, `YT_DLP_RETRIES`, `YT_DLP_EXTRACTOR_RETRIES`, `YT_DLP_FRAGMENT_RETRIES`, `YT_DLP_FILE_ACCESS_RETRIES`, `YT_DLP_RETRY_SLEEP_SECONDS`, and/or the `YT_DLP_SLEEP_*` values. A proxy is not authentication; it only changes where yt-dlp's anonymous public requests originate. Use infrastructure you operate or have permission to use, and expect paid bandwidth if you use a proxy provider.
 
 `SOCIAL_EXTRACTOR_ARGS_JSON` is the emergency escape hatch for new yt-dlp extractor arguments before ReelVault has a first-class setting. It must be a JSON object shaped like yt-dlp's Python `extractor_args`, with extractor names mapping to argument names and string/list values. Example:
 
@@ -494,7 +502,7 @@ Check deployed runtime status:
 curl "$BASE_URL/health"
 ```
 
-The health response includes non-secret downloader diagnostics such as the deployed `yt_dlp_version` and whether optional fallbacks like Cobalt, proxy, impersonation, custom extractor args, Visitor Data, or PO Token settings are configured.
+The health response includes non-secret downloader diagnostics such as the deployed `yt_dlp_version`, retry/timeout settings, and whether optional fallbacks like Cobalt, proxy, impersonation, custom headers, custom extractor args, Visitor Data, or PO Token settings are configured.
 
 ## Deployment
 
@@ -653,7 +661,7 @@ The included tests cover social video URL extraction, Telegram pillar parsing/ca
 | YouTube download reports no supported JavaScript runtime | Use Docker or install Deno locally and make sure `deno` is on `PATH`. |
 | OpenAI transcription failed | Check `OPENAI_API_KEY`, audio file size, and `OPENAI_TRANSCRIPTION_MODEL`. Lower `MAX_AUDIO_SIZE_MB` only if your model limit is smaller. |
 | Provider download failed | This is expected for some links. The row will be saved for manual review. Try a fresh public video URL or set `ENABLE_VIDEO_DOWNLOAD=false` if you only want URL tracking. |
-| Provider works locally but fails on Cloud Run | Datacenter IPs are blocked more often. ReelVault retries several no-cookie YouTube client paths, anonymous Visitor Data, TikTok mobile API options, Instagram URL variants, and optional Cobalt fallback automatically when configured. Some links may still need Telegram upload fallback, a configured PO Token/provider, `YT_DLP_IMPERSONATE_CLIENT`, `SOCIAL_DOWNLOAD_PROXY_URL`, slower `YT_DLP_SLEEP_*` pacing, changed network egress, or intentionally enabled cookie fallback with `ENABLE_AUTH_COOKIES=true`. |
+| Provider works locally but fails on Cloud Run | Datacenter IPs are blocked more often. ReelVault retries several no-cookie YouTube client paths, anonymous Visitor Data, TikTok mobile API options, Instagram URL variants, and optional Cobalt fallback automatically when configured. Some links may still need Telegram upload fallback, a configured PO Token/provider, `YT_DLP_IMPERSONATE_CLIENT`, `SOCIAL_DOWNLOAD_PROXY_URL`, custom headers, higher `YT_DLP_*_RETRIES`, slower `YT_DLP_SLEEP_*` pacing, changed network egress, or intentionally enabled cookie fallback with `ENABLE_AUTH_COOKIES=true`. |
 | Telegram upload fallback fails | Check `ENABLE_TELEGRAM_MEDIA_FALLBACK`, file size, and whether Telegram Bot API can provide the uploaded file. Try sending the media as a document if sending as video fails. |
 
 ## How the Workflow Handles Failures
