@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     instagram_cookies_file: str | None = None
     instagram_cookies_text: str | None = None
     youtube_visitor_data: str | None = None
+    youtube_po_token: str | None = None
+    cobalt_api_base_url: str | None = None
+    cobalt_api_key: str | None = None
+    cobalt_video_quality: str = "720"
+    cobalt_timeout_seconds: int = 300
     enable_debug_logging: bool = False
 
     request_timeout_seconds: int = 30
@@ -77,6 +82,9 @@ class Settings(BaseSettings):
         "instagram_cookies_file",
         "instagram_cookies_text",
         "youtube_visitor_data",
+        "youtube_po_token",
+        "cobalt_api_base_url",
+        "cobalt_api_key",
         mode="before",
     )
     @classmethod

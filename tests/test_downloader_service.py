@@ -1,12 +1,20 @@
 from app.config import Settings
 from app.services.downloader_service import (
     DownloaderService,
+    TIKTOK_NO_AUTH_FALLBACK_STRATEGIES,
     YOUTUBE_FALLBACK_FORMAT,
     YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES,
     fetch_anonymous_youtube_visitor_data,
+    fetch_instagram_redirect_url,
+    instagram_fallback_urls,
+    is_instagram_share_url,
+    should_retry_instagram_with_url_variants,
+    should_retry_tiktok_with_mobile_api,
+    should_try_cobalt_fallback,
     should_retry_youtube_without_webpage,
     summarize_attempt_errors,
 )
+from app.services.cobalt_service import CobaltDownloadResult
 
 
 def test_downloader_ignores_configured_cookies_by_default(tmp_path):
@@ -85,6 +93,39 @@ def test_youtube_visitor_data_fallback_uses_configured_visitor_data(tmp_path):
     assert "cookiefile" not in fallback
 
 
+def test_youtube_po_token_fallback_uses_configured_token(tmp_path):
+    service = DownloaderService(Settings(youtube_visitor_data="VISITOR123", youtube_po_token="web.gvs+TOKEN123"))
+    options = service._yt_dlp_options(str(tmp_path / "%(id)s.%(ext)s"), tmp_path)
+    strategy = next(item for item in YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES if item.name == "web_with_configured_po_token")
+
+    fallback = service._youtube_no_auth_fallback_options(options, strategy, service._youtube_visitor_data())
+
+    assert fallback["extractor_args"]["youtube"] == {
+        "player_client": ["web", "default"],
+        "player_skip": ["webpage", "configs"],
+        "visitor_data": ["VISITOR123"],
+        "po_token": ["web.gvs+TOKEN123"],
+    }
+    assert "cookiefile" not in fallback
+
+
+def test_tiktok_mobile_api_fallback_options_configure_app_info(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.services.downloader_service.tiktok_install_id", lambda: "7250000000000000001")
+    monkeypatch.setattr("app.services.downloader_service.tiktok_device_id", lambda: "7250000000000000002")
+    service = DownloaderService(Settings())
+    options = service._yt_dlp_options(str(tmp_path / "%(id)s.%(ext)s"), tmp_path)
+    strategy = TIKTOK_NO_AUTH_FALLBACK_STRATEGIES[0]
+
+    fallback = service._tiktok_no_auth_fallback_options(options, strategy)
+
+    assert fallback["extractor_args"]["tiktok"] == {
+        "app_info": ["7250000000000000001/musical_ly/35.1.3/2023501030/0"],
+        "api_hostname": ["api16-normal-c-useast1a.tiktokv.com"],
+        "device_id": ["7250000000000000002"],
+    }
+    assert fallback["format"] == "best[ext=mp4]/best"
+
+
 def test_youtube_bot_error_is_retryable():
     assert should_retry_youtube_without_webpage(
         "https://www.youtube.com/shorts/XnjiprcNurg",
@@ -104,6 +145,55 @@ def test_non_youtube_bot_error_is_not_retryable():
         "https://www.instagram.com/reel/ABC123/",
         "ERROR: Sign in to confirm you're not a bot",
     )
+
+
+def test_tiktok_public_error_is_retryable_with_mobile_api():
+    assert should_retry_tiktok_with_mobile_api(
+        "https://www.tiktok.com/@creator/video/7253412088251534594",
+        "Video not available, status code 0",
+    )
+
+
+def test_tiktok_private_error_is_not_retryable_with_mobile_api():
+    assert not should_retry_tiktok_with_mobile_api(
+        "https://www.tiktok.com/@creator/video/7253412088251534594",
+        "You do not have permission to view this post. Log into an account that has access",
+    )
+
+
+def test_instagram_url_variant_error_is_retryable():
+    assert should_retry_instagram_with_url_variants(
+        "https://www.instagram.com/reel/ABC123/",
+        "Requested content is not available, rate-limit reached or login required",
+    )
+
+
+def test_instagram_share_url_unsupported_error_is_retryable():
+    assert should_retry_instagram_with_url_variants(
+        "https://www.instagram.com/share/reel/BA123xyz/",
+        "Unsupported URL: https://www.instagram.com/share/reel/BA123xyz/",
+    )
+
+
+def test_instagram_fallback_urls_include_reel_post_and_embed_variants():
+    assert instagram_fallback_urls("https://www.instagram.com/reel/ABC123/") == [
+        ("instagram_reels_url", "https://www.instagram.com/reels/ABC123/"),
+        ("instagram_post_url", "https://www.instagram.com/p/ABC123/"),
+        ("instagram_reel_embed_url", "https://www.instagram.com/reel/ABC123/embed/"),
+        ("instagram_post_embed_url", "https://www.instagram.com/p/ABC123/embed/"),
+    ]
+
+
+def test_instagram_share_url_detection():
+    assert is_instagram_share_url("https://www.instagram.com/share/reel/BA123xyz/")
+    assert not is_instagram_share_url("https://www.instagram.com/reel/ABC123/")
+
+
+def test_cobalt_fallback_is_limited_to_supported_provider_hosts():
+    assert should_try_cobalt_fallback("https://www.youtube.com/watch?v=jNQXAC9IVRw")
+    assert should_try_cobalt_fallback("https://www.instagram.com/reel/ABC123/")
+    assert should_try_cobalt_fallback("https://www.tiktok.com/@creator/video/7253412088251534594")
+    assert not should_try_cobalt_fallback("https://example.com/video")
 
 
 def test_downloader_retries_youtube_bot_challenge_with_fallback(tmp_path, monkeypatch):
@@ -154,6 +244,80 @@ def test_downloader_continues_to_all_clients_fallback_after_mweb_failure(tmp_pat
     assert calls[2]["extractor_args"]["youtube"]["player_skip"] == ["webpage"]
 
 
+def test_downloader_retries_tiktok_with_mobile_api_fallback(tmp_path, monkeypatch):
+    service = DownloaderService(Settings())
+    calls = []
+    output_file = tmp_path / "video.mp4"
+    output_file.write_bytes(b"video")
+
+    def fake_download(url, output_dir, options):
+        calls.append(options)
+        if len(calls) == 1:
+            raise RuntimeError("Video not available, status code 0")
+        return {"id": "7253412088251534594", "title": "TikTok", "uploader": "creator"}, output_file
+
+    monkeypatch.setattr(service, "_download_with_options", fake_download)
+
+    result = service.download("https://www.tiktok.com/@creator/video/7253412088251534594", tmp_path)
+
+    assert result.success is True
+    assert result.file_path == output_file
+    assert len(calls) == 2
+    assert calls[1]["extractor_args"]["tiktok"]["app_info"][0].endswith("/musical_ly/35.1.3/2023501030/0")
+
+
+def test_downloader_retries_instagram_with_url_variants(tmp_path, monkeypatch):
+    service = DownloaderService(Settings())
+    calls = []
+    output_file = tmp_path / "video.mp4"
+    output_file.write_bytes(b"video")
+
+    def fake_download(url, output_dir, options):
+        calls.append(url)
+        if len(calls) == 1:
+            raise RuntimeError("Requested content is not available, rate-limit reached or login required")
+        return {"id": "ABC123", "title": "Instagram Reel", "uploader": "creator"}, output_file
+
+    monkeypatch.setattr(service, "_download_with_options", fake_download)
+
+    result = service.download("https://www.instagram.com/reel/ABC123/", tmp_path)
+
+    assert result.success is True
+    assert result.file_path == output_file
+    assert calls == [
+        "https://www.instagram.com/reel/ABC123/",
+        "https://www.instagram.com/reels/ABC123/",
+    ]
+
+
+def test_downloader_resolves_instagram_share_redirect_before_retry(tmp_path, monkeypatch):
+    service = DownloaderService(Settings())
+    calls = []
+    output_file = tmp_path / "video.mp4"
+    output_file.write_bytes(b"video")
+
+    def fake_download(url, output_dir, options):
+        calls.append(url)
+        if len(calls) == 1:
+            raise RuntimeError("Unsupported URL: https://www.instagram.com/share/reel/BA123xyz/")
+        return {"id": "ABC123", "title": "Instagram Reel", "uploader": "creator"}, output_file
+
+    monkeypatch.setattr(service, "_download_with_options", fake_download)
+    monkeypatch.setattr(
+        "app.services.downloader_service.fetch_instagram_redirect_url",
+        lambda url, timeout_seconds, user_agent: "https://www.instagram.com/reel/ABC123/",
+    )
+
+    result = service.download("https://www.instagram.com/share/reel/BA123xyz/", tmp_path)
+
+    assert result.success is True
+    assert result.file_path == output_file
+    assert calls == [
+        "https://www.instagram.com/share/reel/BA123xyz/",
+        "https://www.instagram.com/reel/ABC123/",
+    ]
+
+
 def test_downloader_uses_visitor_data_fallback_after_non_visitor_failures(tmp_path, monkeypatch):
     service = DownloaderService(Settings(youtube_visitor_data="VISITOR123"))
     calls = []
@@ -197,6 +361,34 @@ def test_downloader_reports_all_youtube_fallback_failures(tmp_path, monkeypatch)
     assert "all_clients_no_webpage" in result.error_message
 
 
+def test_downloader_uses_configured_cobalt_after_provider_fallbacks_fail(tmp_path, monkeypatch):
+    service = DownloaderService(Settings(cobalt_api_base_url="https://cobalt.example", youtube_visitor_data="VISITOR123"))
+    output_file = tmp_path / "cobalt.mp4"
+
+    def fake_download(url, output_dir, options):
+        raise RuntimeError("Sign in to confirm you're not a bot")
+
+    class FakeCobaltService:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def download(self, url, output_dir):
+            output_file.write_bytes(b"video")
+            return CobaltDownloadResult(
+                file_path=output_file,
+                info={"id": "jNQXAC9IVRw", "title": "Cobalt", "webpage_url": url, "extractor": "cobalt"},
+            )
+
+    monkeypatch.setattr(service, "_download_with_options", fake_download)
+    monkeypatch.setattr("app.services.downloader_service.CobaltService", FakeCobaltService)
+
+    result = service.download("https://www.youtube.com/watch?v=jNQXAC9IVRw", tmp_path)
+
+    assert result.success is True
+    assert result.file_path == output_file
+    assert result.metadata["extractor"] == "cobalt"
+
+
 def test_summarize_attempt_errors_truncates_long_reasons():
     summary = summarize_attempt_errors([("strategy", "x" * 400)])
 
@@ -231,3 +423,35 @@ def test_fetch_anonymous_youtube_visitor_data_parses_homepage(monkeypatch):
     visitor_data = fetch_anonymous_youtube_visitor_data(timeout_seconds=3, user_agent="UA")
 
     assert visitor_data == "VISITOR123"
+
+
+def test_fetch_instagram_redirect_url_parses_final_url(monkeypatch):
+    class FakeResponse:
+        url = "https://www.instagram.com/reel/ABC123/?igsh=abc"
+
+        def raise_for_status(self):
+            return None
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def get(self, url):
+            assert url == "https://www.instagram.com/share/reel/BA123xyz/"
+            return FakeResponse()
+
+    monkeypatch.setattr("app.services.downloader_service.httpx.Client", FakeClient)
+
+    redirect_url = fetch_instagram_redirect_url(
+        "https://www.instagram.com/share/reel/BA123xyz/",
+        timeout_seconds=3,
+        user_agent="UA",
+    )
+
+    assert redirect_url == "https://www.instagram.com/reel/ABC123/"

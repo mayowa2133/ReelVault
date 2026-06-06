@@ -121,6 +121,11 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `INSTAGRAM_COOKIES_FILE` | Legacy alias for `SOCIAL_COOKIES_FILE`; ignored unless `ENABLE_AUTH_COOKIES=true`. |
 | `INSTAGRAM_COOKIES_TEXT` | Legacy alias for `SOCIAL_COOKIES_TEXT`; ignored unless `ENABLE_AUTH_COOKIES=true`. |
 | `YOUTUBE_VISITOR_DATA` | Optional anonymous YouTube Visitor Data override for no-cookie YouTube fallback. Usually unset; ReelVault fetches Visitor Data automatically when needed. |
+| `YOUTUBE_PO_TOKEN` | Optional yt-dlp YouTube PO Token extractor argument value. This is not a login cookie, but logged-out GVS tokens should be paired with matching `YOUTUBE_VISITOR_DATA`. |
+| `COBALT_API_BASE_URL` | Optional Cobalt API base URL. When set, ReelVault tries Cobalt after yt-dlp/provider-specific anonymous fallbacks fail. |
+| `COBALT_API_KEY` | Optional Cobalt API key. Sent as `Authorization: Api-Key ...` for protected Cobalt instances. |
+| `COBALT_VIDEO_QUALITY` | Requested Cobalt video quality, defaults to `720` to control Cloud Run temp storage and Drive size. |
+| `COBALT_TIMEOUT_SECONDS` | Timeout for Cobalt API and tunnel downloads, defaults to `300`. |
 | `ENABLE_DEBUG_LOGGING` | Enables verbose structured JSON logs. |
 
 ## Telegram Bot Setup
@@ -334,11 +339,13 @@ Smoke test:
 
 ## Provider Downloads
 
-ReelVault uses yt-dlp anonymously by default for public YouTube, Instagram Reel, TikTok, and X/Twitter video URLs. Old `INSTAGRAM_COOKIES_*` values are ignored unless `ENABLE_AUTH_COOKIES=true`, which prevents stale cookies from breaking public no-auth downloads.
+ReelVault uses yt-dlp anonymously by default for public YouTube, Instagram Reel, TikTok, and X/Twitter video URLs. Old `INSTAGRAM_COOKIES_*` values are ignored unless `ENABLE_AUTH_COOKIES=true`, which prevents stale cookies from breaking public no-auth downloads. The Docker build installs `yt-dlp[default,curl-cffi]` so extractors that request browser/TLS impersonation can use it.
 
-For YouTube bot-check responses, ReelVault automatically tries a short no-auth fallback chain. It first retries with yt-dlp's mobile web player client while skipping the initial YouTube webpage/config requests, then tries broader YouTube client probing while skipping the bot-checked watch page and preferring small combined MP4 formats. If those fail, it fetches anonymous YouTube Visitor Data and retries while skipping the watch page and config requests, which follows yt-dlp's documented no-cookie Visitor Data path. This can work around some Cloud Run datacenter IP challenges without cookies, but it is still not guaranteed for every URL.
+For YouTube bot-check responses, ReelVault automatically tries a no-auth fallback chain. It retries with yt-dlp's mobile web player client while skipping initial YouTube webpage/config requests, tries broader YouTube client probing, fetches anonymous YouTube Visitor Data, and retries with Visitor Data while skipping the watch page and config requests. If `YOUTUBE_PO_TOKEN` is set, it also tries configured PO Token strategies. These paths follow yt-dlp's documented no-cookie Visitor Data and PO Token hooks. They can work around some Cloud Run datacenter IP challenges without account cookies, but they are still not guaranteed for every URL.
 
-If every anonymous YouTube client path is blocked from the Cloud Run IP, the next non-cookie option is a yt-dlp PO Token provider. PO Tokens are short-lived playback attestation tokens, not account cookies, but they require extra runtime dependencies and may need per-video refreshes as YouTube changes enforcement.
+For TikTok failures, ReelVault retries yt-dlp with TikTok's mobile API extractor arguments: generated install/device IDs, alternate app profiles, and alternate API hostnames. For Instagram failures, ReelVault retries common URL variants (`/reel/`, `/reels/`, `/p/`, and embed URLs) and resolves `instagram.com/share/reel/...` redirects before retrying. These are anonymous public-media fallbacks; private, follower-only, expired, removed, or login-only content will still fail.
+
+If every built-in anonymous path fails and `COBALT_API_BASE_URL` is configured, ReelVault calls a Cobalt API instance as a server-side fallback. Cobalt can return a proxied tunnel, redirect, picker, or error response; ReelVault accepts tunnel/redirect responses and the first video item from picker responses. Cobalt software is free/open-source, but running it is not automatically free: you pay or consume free-tier quota for the host, bandwidth, and any egress. Do not rely on public Cobalt instances unless you operate them or have permission.
 
 Some provider URLs can still fail because platforms rate limit datacenter IPs, change APIs, require login for specific content, or block anonymous access. ReelVault records these as `download_failed` and keeps the source URL for manual review instead of crashing the workflow.
 
@@ -600,7 +607,7 @@ The included tests cover social video URL extraction, Telegram pillar parsing/ca
 | YouTube download reports no supported JavaScript runtime | Use Docker or install Deno locally and make sure `deno` is on `PATH`. |
 | OpenAI transcription failed | Check `OPENAI_API_KEY`, audio file size, and `OPENAI_TRANSCRIPTION_MODEL`. Lower `MAX_AUDIO_SIZE_MB` only if your model limit is smaller. |
 | Provider download failed | This is expected for some links. The row will be saved for manual review. Try a fresh public video URL or set `ENABLE_VIDEO_DOWNLOAD=false` if you only want URL tracking. |
-| Provider works locally but fails on Cloud Run | Datacenter IPs are blocked more often. ReelVault retries several no-cookie YouTube client paths and anonymous Visitor Data automatically, but some links may still need Telegram upload fallback, a yt-dlp PO Token provider, changed network egress, or intentionally enabled cookie fallback with `ENABLE_AUTH_COOKIES=true`. |
+| Provider works locally but fails on Cloud Run | Datacenter IPs are blocked more often. ReelVault retries several no-cookie YouTube client paths, anonymous Visitor Data, TikTok mobile API options, Instagram URL variants, and optional Cobalt fallback automatically when configured. Some links may still need Telegram upload fallback, a configured PO Token, changed network egress, or intentionally enabled cookie fallback with `ENABLE_AUTH_COOKIES=true`. |
 | Telegram upload fallback fails | Check `ENABLE_TELEGRAM_MEDIA_FALLBACK`, file size, and whether Telegram Bot API can provide the uploaded file. Try sending the media as a document if sending as video fails. |
 
 ## How the Workflow Handles Failures
