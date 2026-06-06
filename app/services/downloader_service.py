@@ -789,8 +789,10 @@ def instagram_fallback_urls(url: str) -> list[tuple[str, str]]:
         ("instagram_reel_url", f"https://www.instagram.com/reel/{shortcode}/"),
         ("instagram_reels_url", f"https://www.instagram.com/reels/{shortcode}/"),
         ("instagram_post_url", f"https://www.instagram.com/p/{shortcode}/"),
+        ("instagram_tv_url", f"https://www.instagram.com/tv/{shortcode}/"),
         ("instagram_reel_embed_url", f"https://www.instagram.com/reel/{shortcode}/embed/"),
         ("instagram_post_embed_url", f"https://www.instagram.com/p/{shortcode}/embed/"),
+        ("instagram_tv_embed_url", f"https://www.instagram.com/tv/{shortcode}/embed/"),
     ]
 
     normalized_current = url.rstrip("/") + "/"
@@ -809,7 +811,7 @@ def is_instagram_share_url(url: str) -> bool:
     if host != "instagram.com":
         return False
     parts = [part for part in parsed.path.split("/") if part]
-    return len(parts) >= 3 and parts[0].lower() == "share" and parts[1].lower() in {"reel", "p"}
+    return len(parts) >= 3 and parts[0].lower() == "share" and parts[1].lower() in {"reel", "p", "tv"}
 
 
 def fetch_instagram_redirect_url(url: str, timeout_seconds: int, user_agent: str) -> str | None:

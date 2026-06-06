@@ -282,13 +282,17 @@ def test_instagram_fallback_urls_include_reel_post_and_embed_variants():
     assert instagram_fallback_urls("https://www.instagram.com/reel/ABC123/") == [
         ("instagram_reels_url", "https://www.instagram.com/reels/ABC123/"),
         ("instagram_post_url", "https://www.instagram.com/p/ABC123/"),
+        ("instagram_tv_url", "https://www.instagram.com/tv/ABC123/"),
         ("instagram_reel_embed_url", "https://www.instagram.com/reel/ABC123/embed/"),
         ("instagram_post_embed_url", "https://www.instagram.com/p/ABC123/embed/"),
+        ("instagram_tv_embed_url", "https://www.instagram.com/tv/ABC123/embed/"),
     ]
 
 
 def test_instagram_share_url_detection():
     assert is_instagram_share_url("https://www.instagram.com/share/reel/BA123xyz/")
+    assert is_instagram_share_url("https://www.instagram.com/share/p/BA123xyz/")
+    assert is_instagram_share_url("https://www.instagram.com/share/tv/BA123xyz/")
     assert not is_instagram_share_url("https://www.instagram.com/reel/ABC123/")
 
 

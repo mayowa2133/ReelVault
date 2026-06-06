@@ -21,6 +21,24 @@ def test_extracts_share_reel_url():
     assert reels[0].is_share_url is True
 
 
+def test_extracts_instagram_reels_posts_and_tv_urls():
+    references = InstagramService.extract_reel_urls(
+        """
+        https://www.instagram.com/reels/REELS123/?igsh=abc
+        https://www.instagram.com/p/POST456/?utm_source=ig_web_copy_link
+        https://www.instagram.com/tv/TV789/
+        https://www.instagram.com/share/p/SHAREPOST/
+        """
+    )
+
+    assert [(reference.url, reference.shortcode, reference.is_share_url) for reference in references] == [
+        ("https://www.instagram.com/reel/REELS123/", "REELS123", False),
+        ("https://www.instagram.com/p/POST456/", "POST456", False),
+        ("https://www.instagram.com/tv/TV789/", "TV789", False),
+        ("https://www.instagram.com/share/p/SHAREPOST/", "SHAREPOST", True),
+    ]
+
+
 def test_extracts_multiple_unique_reel_urls():
     text = """
     First: https://instagram.com/reel/ONE123/
@@ -34,7 +52,7 @@ def test_extracts_multiple_unique_reel_urls():
 
 
 def test_ignores_non_reel_urls():
-    reels = InstagramService.extract_reel_urls("Read https://example.com and https://www.instagram.com/p/ABC/")
+    reels = InstagramService.extract_reel_urls("Read https://example.com and https://www.instagram.com/explore/")
 
     assert reels == []
 
