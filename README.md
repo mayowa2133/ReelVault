@@ -502,7 +502,7 @@ Check deployed runtime status:
 curl "$BASE_URL/health"
 ```
 
-The health response includes non-secret downloader diagnostics such as the deployed `yt_dlp_version`, retry/timeout settings, and whether optional fallbacks like Cobalt, proxy, impersonation, custom headers, custom extractor args, Visitor Data, or PO Token settings are configured.
+The health response includes Cloud Run runtime identifiers (`K_SERVICE`, `K_REVISION`, `K_CONFIGURATION`) plus non-secret downloader diagnostics such as the deployed `yt_dlp_version`, retry/timeout settings, and whether optional fallbacks like Cobalt, proxy, impersonation, custom headers, custom extractor args, Visitor Data, or PO Token settings are configured.
 
 Test provider download from the deployed Cloud Run revision:
 

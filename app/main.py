@@ -1,3 +1,5 @@
+import os
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
@@ -28,7 +30,15 @@ app.include_router(diagnostics_router)
 
 @app.get("/health")
 def health() -> dict[str, object]:
-    return {"status": "ok", "downloader": downloader_runtime_info(settings)}
+    return {
+        "status": "ok",
+        "runtime": {
+            "service": os.getenv("K_SERVICE"),
+            "revision": os.getenv("K_REVISION"),
+            "configuration": os.getenv("K_CONFIGURATION"),
+        },
+        "downloader": downloader_runtime_info(settings),
+    }
 
 
 @app.exception_handler(ReelVaultError)

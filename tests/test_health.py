@@ -9,6 +9,9 @@ def test_health_includes_downloader_runtime_info():
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
+    assert "service" in body["runtime"]
+    assert "revision" in body["runtime"]
+    assert "configuration" in body["runtime"]
     assert body["downloader"]["yt_dlp_available"] is True
     assert body["downloader"]["yt_dlp_version"]
     assert "cobalt_configured" in body["downloader"]
