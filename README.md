@@ -125,6 +125,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `YOUTUBE_FETCH_POT_POLICY` | Optional yt-dlp YouTube PO Token fetch policy: `never`, `auto`, or `always`. Useful only when a PO Token provider plugin/runtime is installed. |
 | `YOUTUBE_INCLUDE_MISSING_POT_FORMATS` | Set `true` to allow yt-dlp to expose YouTube formats skipped because a PO Token is missing. These formats may still fail with 403. |
 | `YOUTUBE_USE_AD_PLAYBACK_CONTEXT` | Set `true` to pass yt-dlp's YouTube `use_ad_playback_context` extractor argument. Experimental and off by default. |
+| `YOUTUBE_POT_BGUTIL_BASE_URL` | Optional base URL for the `bgutil-ytdlp-pot-provider` HTTP server, mapped to yt-dlp's `youtubepot-bgutilhttp:base_url` extractor argument. |
 | `YOUTUBE_PIPED_API_BASE_URLS` | Optional comma-separated Piped API base URLs for YouTube fallback after yt-dlp fails. Use instances you operate or have permission to use. |
 | `YOUTUBE_INVIDIOUS_BASE_URLS` | Optional comma-separated Invidious base URLs for YouTube fallback after yt-dlp fails. Use instances you operate or have permission to use. |
 | `YOUTUBE_MIRROR_REGION` | Region hint for Invidious API fallback, defaults to `US`. |
@@ -365,6 +366,8 @@ ReelVault uses yt-dlp anonymously by default for public YouTube, Instagram media
 
 For YouTube bot-check responses, ReelVault automatically tries a no-auth fallback chain. It retries with yt-dlp's mobile web player client while skipping initial YouTube webpage/config requests, then tries explicit Android/iOS clients, broader YouTube client probing, anonymous YouTube Visitor Data, and Visitor Data retries while skipping the watch page and config requests. If `YOUTUBE_PO_TOKEN` is set, it also tries configured PO Token strategies. `YOUTUBE_FETCH_POT_POLICY`, `YOUTUBE_INCLUDE_MISSING_POT_FORMATS`, and `YOUTUBE_USE_AD_PLAYBACK_CONTEXT` expose the remaining yt-dlp YouTube PO-token knobs for controlled experiments. These paths follow yt-dlp's documented no-cookie Visitor Data and PO Token hooks. They can work around some Cloud Run datacenter IP challenges without account cookies, but they are still not guaranteed for every URL.
 
+yt-dlp currently recommends PO Token provider plugins instead of manually copying PO tokens because YouTube can bind tokens to each video. The Docker build supports trusted plugin packages with `YT_DLP_PLUGIN_PACKAGE_SPECS`; for the common `bgutil-ytdlp-pot-provider` HTTP-server setup, install the plugin at build time, set `YOUTUBE_FETCH_POT_POLICY=always` or `auto`, and set `YOUTUBE_POT_BGUTIL_BASE_URL` if the provider server is not reachable at the plugin default. This is not account authentication, but it does add third-party code and usually a separate token-provider runtime.
+
 For TikTok failures, ReelVault retries yt-dlp with TikTok's mobile API extractor arguments: generated install/device IDs, alternate app profiles, and alternate API hostnames. For Instagram failures, ReelVault accepts `/reel/`, `/reels/`, `/p/`, `/tv/`, and matching share URLs, retries common URL/embed variants, and resolves `instagram.com/share/...` redirects before retrying. These are anonymous public-media fallbacks; private, follower-only, expired, removed, or login-only content will still fail.
 
 If the problem is Cloud Run egress, browser/TLS fingerprinting, transient provider errors, or request pacing rather than content access, set `SOCIAL_DOWNLOAD_PROXY_URL`, `YT_DLP_IMPERSONATE_CLIENT`, `SOCIAL_DOWNLOAD_SOURCE_ADDRESS`, `SOCIAL_DOWNLOAD_USER_AGENT`, `SOCIAL_DOWNLOAD_ACCEPT_LANGUAGE`, `YT_DLP_RETRIES`, `YT_DLP_EXTRACTOR_RETRIES`, `YT_DLP_FRAGMENT_RETRIES`, `YT_DLP_FILE_ACCESS_RETRIES`, `YT_DLP_RETRY_SLEEP_SECONDS`, and/or the `YT_DLP_SLEEP_*` values. A proxy is not authentication; it only changes where yt-dlp's anonymous public requests originate. Use infrastructure you operate or have permission to use, and expect paid bandwidth if you use a proxy provider.
@@ -399,7 +402,7 @@ docker build \
   -t reelvault .
 ```
 
-Only install packages you trust. PO Token provider plugins can improve YouTube reliability, but they add third-party code and may require their own runtime services or browser infrastructure.
+Only install packages you trust. PO Token provider plugins can improve YouTube reliability, but they add third-party code and may require their own runtime services or browser infrastructure. After deployment, `/health` reports `yt_dlp_plugin_package_specs` and `youtube_po_token_provider_plugins`; for `bgutil-ytdlp-pot-provider`, also set `YOUTUBE_FETCH_POT_POLICY=always` or `auto`, and set `YOUTUBE_POT_BGUTIL_BASE_URL` when using a non-default provider server URL.
 
 Optional cookie fallback:
 
@@ -508,7 +511,7 @@ Check deployed runtime status:
 curl "$BASE_URL/health"
 ```
 
-The health response includes Cloud Run runtime identifiers (`K_SERVICE`, `K_REVISION`, `K_CONFIGURATION`) plus non-secret downloader diagnostics such as the deployed `yt_dlp_version`, retry/timeout settings, and whether optional fallbacks like Cobalt, proxy, impersonation, custom headers, custom extractor args, Visitor Data, or PO Token settings are configured.
+The health response includes Cloud Run runtime identifiers (`K_SERVICE`, `K_REVISION`, `K_CONFIGURATION`) plus non-secret downloader diagnostics such as the deployed `yt_dlp_version`, build-time yt-dlp plugin package specs, loaded YouTube PO-token provider plugins, retry/timeout settings, and whether optional fallbacks like Cobalt, proxy, impersonation, custom headers, custom extractor args, Visitor Data, or PO Token settings are configured.
 
 Test provider download from the deployed Cloud Run revision:
 

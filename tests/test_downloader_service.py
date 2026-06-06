@@ -123,6 +123,22 @@ def test_downloader_applies_impersonation_source_address_and_youtube_extractor_o
     }
 
 
+def test_downloader_applies_bgutil_po_token_provider_base_url(tmp_path):
+    service = DownloaderService(
+        Settings(
+            youtube_fetch_pot_policy="always",
+            youtube_pot_bgutil_base_url="https://pot-provider.example",
+        )
+    )
+
+    options = service._yt_dlp_options(str(tmp_path / "%(id)s.%(ext)s"), tmp_path)
+
+    assert options["extractor_args"]["youtube"] == {"fetch_pot": ["always"]}
+    assert options["extractor_args"]["youtubepot-bgutilhttp"] == {
+        "base_url": ["https://pot-provider.example"],
+    }
+
+
 def test_downloader_supports_any_impersonation_alias(tmp_path):
     service = DownloaderService(Settings(yt_dlp_impersonate_client="any"))
 
@@ -133,10 +149,15 @@ def test_downloader_supports_any_impersonation_alias(tmp_path):
 
 def test_downloader_runtime_info_includes_package_spec(monkeypatch):
     monkeypatch.setenv("REELVAULT_YT_DLP_PACKAGE_SPEC", "yt-dlp @ https://example.test/archive.tar.gz")
+    monkeypatch.setenv("REELVAULT_YT_DLP_PLUGIN_PACKAGE_SPECS", "bgutil-ytdlp-pot-provider==1.3.1")
 
     info = downloader_runtime_info(Settings())
 
     assert info["yt_dlp_package_spec"] == "yt-dlp @ https://example.test/archive.tar.gz"
+    assert info["yt_dlp_plugin_package_specs"] == "bgutil-ytdlp-pot-provider==1.3.1"
+    assert info["youtube_pot_bgutil_base_url_configured"] is False
+    assert "youtube_po_token_provider_plugins_available" in info
+    assert "youtube_po_token_provider_plugins" in info
 
 
 def test_downloader_merges_custom_extractor_args_json(tmp_path):

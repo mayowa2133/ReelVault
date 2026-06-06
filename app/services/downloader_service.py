@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 import json
 import os
 from pathlib import Path
@@ -514,6 +515,8 @@ class DownloaderService:
         base_args: dict[str, dict[str, list[str]]] = {}
         if youtube_args:
             base_args["youtube"] = youtube_args
+        if self.settings.youtube_pot_bgutil_base_url:
+            base_args["youtubepot-bgutilhttp"] = {"base_url": [self.settings.youtube_pot_bgutil_base_url]}
 
         custom_args = parse_extractor_args_json(self.settings.social_extractor_args_json)
         return merge_extractor_args(base_args, custom_args)
@@ -611,6 +614,7 @@ def downloader_runtime_info(settings: Settings) -> dict[str, Any]:
         "yt_dlp_available": yt_dlp is not None,
         "yt_dlp_version": version,
         "yt_dlp_package_spec": os.getenv("REELVAULT_YT_DLP_PACKAGE_SPEC") or None,
+        "yt_dlp_plugin_package_specs": os.getenv("REELVAULT_YT_DLP_PLUGIN_PACKAGE_SPECS") or None,
         "auth_cookies_enabled": settings.enable_auth_cookies,
         "cobalt_configured": bool(settings.cobalt_api_base_url),
         "proxy_configured": bool(settings.social_download_proxy_url),
@@ -619,6 +623,7 @@ def downloader_runtime_info(settings: Settings) -> dict[str, Any]:
         "youtube_visitor_data_configured": bool(settings.youtube_visitor_data),
         "youtube_po_token_configured": bool(settings.youtube_po_token),
         "youtube_fetch_pot_policy": settings.youtube_fetch_pot_policy,
+        "youtube_pot_bgutil_base_url_configured": bool(settings.youtube_pot_bgutil_base_url),
         "youtube_mirror_configured": bool(settings.youtube_piped_api_base_urls or settings.youtube_invidious_base_urls),
         "youtube_piped_configured": bool(settings.youtube_piped_api_base_urls),
         "youtube_invidious_configured": bool(settings.youtube_invidious_base_urls),
@@ -630,7 +635,48 @@ def downloader_runtime_info(settings: Settings) -> dict[str, Any]:
         "yt_dlp_file_access_retries": settings.yt_dlp_file_access_retries,
         "yt_dlp_retry_sleep_configured": settings.yt_dlp_retry_sleep_seconds is not None,
         "yt_dlp_socket_timeout_seconds": settings.yt_dlp_socket_timeout_seconds,
+        **youtube_po_token_provider_runtime_info(),
     }
+
+
+@lru_cache(maxsize=1)
+def youtube_po_token_provider_runtime_info() -> dict[str, Any]:
+    if yt_dlp is None:
+        return {
+            "youtube_po_token_provider_plugins_available": False,
+            "youtube_po_token_provider_plugins": [],
+            "youtube_po_token_provider_error": "yt-dlp is not installed",
+        }
+
+    try:
+        from yt_dlp.extractor import import_extractors
+        from yt_dlp.extractor.youtube.pot._provider import BuiltinIEContentProvider
+        from yt_dlp.extractor.youtube.pot._registry import _pot_providers
+        from yt_dlp.plugins import load_all_plugins
+
+        import_extractors()
+        load_all_plugins()
+
+        providers: list[str] = []
+        for provider in _pot_providers.value.values():
+            if issubclass(provider, BuiltinIEContentProvider):
+                continue
+            name = str(getattr(provider, "PROVIDER_NAME", provider.__name__))
+            version = getattr(provider, "PROVIDER_VERSION", None)
+            providers.append(f"{name}-{version}" if version else name)
+
+        providers = sorted(set(providers))
+        return {
+            "youtube_po_token_provider_plugins_available": bool(providers),
+            "youtube_po_token_provider_plugins": providers,
+            "youtube_po_token_provider_error": None,
+        }
+    except Exception as exc:  # pragma: no cover - depends on yt-dlp internals
+        return {
+            "youtube_po_token_provider_plugins_available": False,
+            "youtube_po_token_provider_plugins": [],
+            "youtube_po_token_provider_error": short_error(public_error_message(exc)),
+        }
 
 
 def resolve_downloaded_path(info: dict[str, Any], output_dir: Path, ydl: Any) -> Path | None:
