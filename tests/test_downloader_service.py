@@ -181,6 +181,20 @@ def test_youtube_all_clients_fallback_skips_video_webpage(tmp_path):
     assert fallback["format"] == YOUTUBE_FALLBACK_FORMAT
 
 
+def test_youtube_android_ios_fallback_skips_webpage_and_configs(tmp_path):
+    service = DownloaderService(Settings())
+    options = service._yt_dlp_options(str(tmp_path / "%(id)s.%(ext)s"), tmp_path)
+    strategy = next(item for item in YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES if item.name == "android_ios_no_webpage_configs")
+
+    fallback = service._youtube_no_auth_fallback_options(options, strategy)
+
+    assert fallback["extractor_args"]["youtube"] == {
+        "player_client": ["android", "ios"],
+        "player_skip": ["webpage", "configs"],
+    }
+    assert fallback["format"] == YOUTUBE_FALLBACK_FORMAT
+
+
 def test_youtube_visitor_data_fallback_uses_configured_visitor_data(tmp_path):
     service = DownloaderService(Settings(youtube_visitor_data="VISITOR123"))
     options = service._yt_dlp_options(str(tmp_path / "%(id)s.%(ext)s"), tmp_path)
@@ -337,6 +351,8 @@ def test_downloader_continues_to_all_clients_fallback_after_mweb_failure(tmp_pat
             raise RuntimeError("Sign in to confirm you're not a bot. Use --cookies-from-browser or --cookies")
         if len(calls) == 2:
             raise RuntimeError("Failed to extract any player response")
+        if len(calls) == 3:
+            raise RuntimeError("No video formats found")
         return {"id": "jNQXAC9IVRw", "title": "Me at the zoo", "uploader": "jawed"}, output_file
 
     monkeypatch.setattr(service, "_download_with_options", fake_download)
@@ -345,10 +361,12 @@ def test_downloader_continues_to_all_clients_fallback_after_mweb_failure(tmp_pat
 
     assert result.success is True
     assert result.file_path == output_file
-    assert len(calls) == 3
+    assert len(calls) == 4
     assert calls[1]["extractor_args"]["youtube"]["player_client"] == ["mweb"]
-    assert calls[2]["extractor_args"]["youtube"]["player_client"] == ["all"]
-    assert calls[2]["extractor_args"]["youtube"]["player_skip"] == ["webpage"]
+    assert calls[2]["extractor_args"]["youtube"]["player_client"] == ["android", "ios"]
+    assert calls[2]["extractor_args"]["youtube"]["player_skip"] == ["webpage", "configs"]
+    assert calls[3]["extractor_args"]["youtube"]["player_client"] == ["all"]
+    assert calls[3]["extractor_args"]["youtube"]["player_skip"] == ["webpage"]
 
 
 def test_downloader_retries_tiktok_with_mobile_api_fallback(tmp_path, monkeypatch):
@@ -433,7 +451,7 @@ def test_downloader_uses_visitor_data_fallback_after_non_visitor_failures(tmp_pa
 
     def fake_download(url, output_dir, options):
         calls.append(options)
-        if len(calls) <= 4:
+        if len(calls) <= 5:
             raise RuntimeError("Sign in to confirm you're not a bot")
         return {"id": "jNQXAC9IVRw", "title": "Me at the zoo", "uploader": "jawed"}, output_file
 
@@ -443,8 +461,8 @@ def test_downloader_uses_visitor_data_fallback_after_non_visitor_failures(tmp_pa
 
     assert result.success is True
     assert result.file_path == output_file
-    assert len(calls) == 5
-    assert calls[4]["extractor_args"]["youtube"] == {
+    assert len(calls) == 6
+    assert calls[5]["extractor_args"]["youtube"] == {
         "player_client": ["default"],
         "player_skip": ["webpage", "configs"],
         "visitor_data": ["VISITOR123"],

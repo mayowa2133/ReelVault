@@ -56,6 +56,14 @@ YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES = (
         format_selector=YOUTUBE_FALLBACK_FORMAT,
     ),
     YoutubeNoAuthFallbackStrategy(
+        name="android_ios_no_webpage_configs",
+        youtube_args={
+            "player_client": ["android", "ios"],
+            "player_skip": ["webpage", "configs"],
+        },
+        format_selector=YOUTUBE_FALLBACK_FORMAT,
+    ),
+    YoutubeNoAuthFallbackStrategy(
         name="all_clients_no_webpage",
         youtube_args={
             "player_client": ["all"],
