@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import re
 import random
@@ -17,8 +18,10 @@ from app.utils.logging import get_logger
 
 try:
     import yt_dlp
+    from yt_dlp.networking.impersonate import ImpersonateTarget
 except ImportError:  # pragma: no cover - exercised only when dependency is missing
     yt_dlp = None  # type: ignore[assignment]
+    ImpersonateTarget = None  # type: ignore[assignment]
 
 logger = get_logger(__name__)
 
@@ -418,8 +421,17 @@ class DownloaderService:
             "http_headers": {"User-Agent": self._yt_dlp_user_agent()},
         }
 
+        extractor_args = self._configured_extractor_args()
+        if extractor_args:
+            options["extractor_args"] = extractor_args
         if self.settings.social_download_proxy_url:
             options["proxy"] = self.settings.social_download_proxy_url
+        if self.settings.social_download_source_address:
+            options["source_address"] = self.settings.social_download_source_address
+        if self.settings.yt_dlp_impersonate_client:
+            impersonate = yt_dlp_impersonate_value(self.settings.yt_dlp_impersonate_client)
+            if impersonate:
+                options["impersonate"] = impersonate
         if self.settings.yt_dlp_sleep_requests_seconds is not None:
             options["sleep_interval_requests"] = self.settings.yt_dlp_sleep_requests_seconds
         if self.settings.yt_dlp_sleep_interval_seconds is not None:
@@ -431,6 +443,30 @@ class DownloaderService:
         if cookie_file:
             options["cookiefile"] = str(cookie_file)
         return options
+
+    def _configured_extractor_args(self) -> dict[str, dict[str, list[str]]]:
+        youtube_args: dict[str, list[str]] = {}
+
+        if self.settings.youtube_fetch_pot_policy:
+            fetch_pot_policy = self.settings.youtube_fetch_pot_policy.strip().lower()
+            if fetch_pot_policy in {"never", "auto", "always"}:
+                youtube_args["fetch_pot"] = [fetch_pot_policy]
+            else:
+                logger.warning(
+                    "invalid_youtube_fetch_pot_policy",
+                    extra={"value": self.settings.youtube_fetch_pot_policy},
+                )
+        if self.settings.youtube_include_missing_pot_formats:
+            youtube_args["formats"] = ["missing_pot"]
+        if self.settings.youtube_use_ad_playback_context:
+            youtube_args["use_ad_playback_context"] = ["true"]
+
+        base_args: dict[str, dict[str, list[str]]] = {}
+        if youtube_args:
+            base_args["youtube"] = youtube_args
+
+        custom_args = parse_extractor_args_json(self.settings.social_extractor_args_json)
+        return merge_extractor_args(base_args, custom_args)
 
     def _youtube_no_auth_fallback_options(
         self,
@@ -587,6 +623,79 @@ def fetch_anonymous_youtube_visitor_data(timeout_seconds: int, user_agent: str) 
         if match:
             return match.group(1)
     return None
+
+
+def parse_extractor_args_json(value: str | None) -> dict[str, dict[str, list[str]]]:
+    if not value:
+        return {}
+
+    try:
+        raw_args = json.loads(value)
+    except json.JSONDecodeError as exc:
+        logger.warning("invalid_social_extractor_args_json", extra={"error": str(exc)})
+        return {}
+
+    if not isinstance(raw_args, dict):
+        logger.warning("invalid_social_extractor_args_json", extra={"error": "top-level value must be an object"})
+        return {}
+
+    return normalize_extractor_args(raw_args)
+
+
+def normalize_extractor_args(raw_args: dict[str, Any]) -> dict[str, dict[str, list[str]]]:
+    normalized: dict[str, dict[str, list[str]]] = {}
+    for extractor_key, extractor_values in raw_args.items():
+        if not isinstance(extractor_values, dict):
+            logger.warning(
+                "invalid_social_extractor_args_json",
+                extra={"extractor": str(extractor_key), "error": "extractor value must be an object"},
+            )
+            continue
+
+        normalized_values: dict[str, list[str]] = {}
+        for arg_key, arg_value in extractor_values.items():
+            normalized_values[normalize_extractor_arg_key(arg_key)] = normalize_extractor_arg_values(arg_value)
+
+        if normalized_values:
+            normalized[str(extractor_key).strip().lower()] = normalized_values
+    return normalized
+
+
+def merge_extractor_args(*extractor_args: dict[str, dict[str, list[str]]]) -> dict[str, dict[str, list[str]]]:
+    merged: dict[str, dict[str, list[str]]] = {}
+    for extractor_arg in extractor_args:
+        for extractor_key, extractor_values in extractor_arg.items():
+            existing_values = dict(merged.get(extractor_key) or {})
+            existing_values.update(extractor_values)
+            merged[extractor_key] = existing_values
+    return merged
+
+
+def normalize_extractor_arg_key(value: Any) -> str:
+    return str(value).strip().lower().replace("-", "_")
+
+
+def normalize_extractor_arg_values(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [str(value).strip()] if str(value).strip() else []
+
+
+def yt_dlp_impersonate_value(value: str) -> Any | None:
+    if ImpersonateTarget is None:
+        return None
+
+    normalized = value.strip()
+    if normalized.lower() in {"any", "default"}:
+        return ImpersonateTarget()
+
+    try:
+        return ImpersonateTarget.from_str(normalized.lower())
+    except ValueError as exc:
+        logger.warning("invalid_yt_dlp_impersonate_client", extra={"value": value, "error": str(exc)})
+        return None
 
 
 def tiktok_app_info(strategy: TikTokNoAuthFallbackStrategy) -> str:

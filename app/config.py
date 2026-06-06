@@ -56,7 +56,13 @@ class Settings(BaseSettings):
     instagram_cookies_text: str | None = None
     youtube_visitor_data: str | None = None
     youtube_po_token: str | None = None
+    youtube_fetch_pot_policy: str | None = None
+    youtube_include_missing_pot_formats: bool = False
+    youtube_use_ad_playback_context: bool = False
     social_download_proxy_url: str | None = None
+    social_download_source_address: str | None = None
+    social_extractor_args_json: str | None = None
+    yt_dlp_impersonate_client: str | None = None
     yt_dlp_sleep_requests_seconds: float | None = None
     yt_dlp_sleep_interval_seconds: float | None = None
     yt_dlp_max_sleep_interval_seconds: float | None = None
@@ -87,7 +93,11 @@ class Settings(BaseSettings):
         "instagram_cookies_text",
         "youtube_visitor_data",
         "youtube_po_token",
+        "youtube_fetch_pot_policy",
         "social_download_proxy_url",
+        "social_download_source_address",
+        "social_extractor_args_json",
+        "yt_dlp_impersonate_client",
         "cobalt_api_base_url",
         "cobalt_api_key",
         mode="before",

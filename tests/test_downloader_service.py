@@ -8,6 +8,7 @@ from app.services.downloader_service import (
     fetch_instagram_redirect_url,
     instagram_fallback_urls,
     is_instagram_share_url,
+    parse_extractor_args_json,
     should_retry_instagram_with_url_variants,
     should_retry_tiktok_with_mobile_api,
     should_try_cobalt_fallback,
@@ -66,6 +67,59 @@ def test_downloader_applies_proxy_and_sleep_options(tmp_path):
     assert options["sleep_interval_requests"] == 2.5
     assert options["sleep_interval"] == 3
     assert options["max_sleep_interval"] == 7
+
+
+def test_downloader_applies_impersonation_source_address_and_youtube_extractor_options(tmp_path):
+    service = DownloaderService(
+        Settings(
+            social_download_source_address="0.0.0.0",
+            yt_dlp_impersonate_client="chrome-120",
+            youtube_fetch_pot_policy="always",
+            youtube_include_missing_pot_formats=True,
+            youtube_use_ad_playback_context=True,
+        )
+    )
+
+    options = service._yt_dlp_options(str(tmp_path / "%(id)s.%(ext)s"), tmp_path)
+
+    assert options["source_address"] == "0.0.0.0"
+    assert str(options["impersonate"]) == "chrome-120"
+    assert options["extractor_args"]["youtube"] == {
+        "fetch_pot": ["always"],
+        "formats": ["missing_pot"],
+        "use_ad_playback_context": ["true"],
+    }
+
+
+def test_downloader_supports_any_impersonation_alias(tmp_path):
+    service = DownloaderService(Settings(yt_dlp_impersonate_client="any"))
+
+    options = service._yt_dlp_options(str(tmp_path / "%(id)s.%(ext)s"), tmp_path)
+
+    assert str(options["impersonate"]) == ""
+
+
+def test_downloader_merges_custom_extractor_args_json(tmp_path):
+    service = DownloaderService(
+        Settings(
+            youtube_fetch_pot_policy="auto",
+            social_extractor_args_json='{"youtube":{"fetch-pot":"always","player-client":["ios"]},"instagram":{"app_id":"123"}}',
+        )
+    )
+
+    options = service._yt_dlp_options(str(tmp_path / "%(id)s.%(ext)s"), tmp_path)
+
+    assert options["extractor_args"] == {
+        "youtube": {
+            "fetch_pot": ["always"],
+            "player_client": ["ios"],
+        },
+        "instagram": {"app_id": ["123"]},
+    }
+
+
+def test_parse_extractor_args_json_ignores_invalid_json():
+    assert parse_extractor_args_json("not json") == {}
 
 
 def test_youtube_no_auth_fallback_options_skip_webpage(tmp_path):
