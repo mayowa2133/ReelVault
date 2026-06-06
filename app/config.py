@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     youtube_fetch_pot_policy: str | None = None
     youtube_include_missing_pot_formats: bool = False
     youtube_use_ad_playback_context: bool = False
+    youtube_piped_api_base_urls: str | None = None
+    youtube_invidious_base_urls: str | None = None
+    youtube_mirror_region: str = "US"
+    youtube_mirror_timeout_seconds: int = 300
     social_download_proxy_url: str | None = None
     social_download_source_address: str | None = None
     social_download_user_agent: str | None = None
@@ -102,6 +106,8 @@ class Settings(BaseSettings):
         "youtube_visitor_data",
         "youtube_po_token",
         "youtube_fetch_pot_policy",
+        "youtube_piped_api_base_urls",
+        "youtube_invidious_base_urls",
         "social_download_proxy_url",
         "social_download_source_address",
         "social_download_user_agent",

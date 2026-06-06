@@ -14,6 +14,7 @@ import httpx
 from app.config import Settings
 from app.models.schemas import DownloadResult
 from app.services.cobalt_service import CobaltService
+from app.services.youtube_mirror_service import YoutubeMirrorService
 from app.utils.errors import DownloadFailedError, ExternalServiceError, public_error_message
 from app.utils.logging import get_logger
 
@@ -184,13 +185,19 @@ class DownloaderService:
                     reason,
                 )
                 if fallback_error:
-                    info, file_path, fallback_error = self._download_with_cobalt_fallback(
+                    info, file_path, fallback_error = self._download_with_youtube_mirror_fallback(
                         url,
                         output_dir,
                         fallback_error,
                     )
                     if fallback_error:
-                        return self._download_failed_result(fallback_error)
+                        info, file_path, fallback_error = self._download_with_cobalt_fallback(
+                            url,
+                            output_dir,
+                            fallback_error,
+                        )
+                        if fallback_error:
+                            return self._download_failed_result(fallback_error)
             elif should_retry_tiktok_with_mobile_api(url, reason):
                 info, file_path, fallback_error = self._download_with_tiktok_fallbacks(
                     url,
@@ -415,6 +422,26 @@ class DownloaderService:
             logger.warning("cobalt_fallback_failed", extra={"url": url, "error": cobalt_reason})
             return {}, None, f"{initial_reason}. Cobalt fallback failed: {cobalt_reason}"
 
+    def _download_with_youtube_mirror_fallback(
+        self,
+        url: str,
+        output_dir: Path,
+        initial_reason: str,
+    ) -> tuple[dict[str, Any], Path | None, str | None]:
+        if provider_host(url) not in {"youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}:
+            return {}, None, initial_reason
+        if not (self.settings.youtube_piped_api_base_urls or self.settings.youtube_invidious_base_urls):
+            return {}, None, initial_reason
+
+        try:
+            mirror_result = YoutubeMirrorService(self.settings).download(url, output_dir)
+            logger.warning("youtube_download_succeeded_with_mirror_fallback", extra={"url": url})
+            return mirror_result.info, mirror_result.file_path, None
+        except Exception as mirror_exc:
+            mirror_reason = public_error_message(mirror_exc)
+            logger.warning("youtube_mirror_fallback_failed", extra={"url": url, "error": mirror_reason})
+            return {}, None, f"{initial_reason}. YouTube mirror fallback failed: {mirror_reason}"
+
     def _yt_dlp_options(self, output_template: str, output_dir: Path) -> dict[str, Any]:
         options: dict[str, Any] = {
             "outtmpl": output_template,
@@ -592,6 +619,9 @@ def downloader_runtime_info(settings: Settings) -> dict[str, Any]:
         "youtube_visitor_data_configured": bool(settings.youtube_visitor_data),
         "youtube_po_token_configured": bool(settings.youtube_po_token),
         "youtube_fetch_pot_policy": settings.youtube_fetch_pot_policy,
+        "youtube_mirror_configured": bool(settings.youtube_piped_api_base_urls or settings.youtube_invidious_base_urls),
+        "youtube_piped_configured": bool(settings.youtube_piped_api_base_urls),
+        "youtube_invidious_configured": bool(settings.youtube_invidious_base_urls),
         "custom_user_agent_configured": bool(settings.social_download_user_agent),
         "custom_accept_language_configured": bool(settings.social_download_accept_language),
         "yt_dlp_retries": settings.yt_dlp_retries,
@@ -652,6 +682,8 @@ def compact_metadata(info: dict[str, Any]) -> dict[str, str | int | float | None
         "extractor",
         "cobalt_status",
         "cobalt_service",
+        "youtube_mirror_service",
+        "format_note",
     ]
     return {key: info.get(key) for key in keys if key in info}
 

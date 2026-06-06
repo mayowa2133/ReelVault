@@ -125,6 +125,10 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `YOUTUBE_FETCH_POT_POLICY` | Optional yt-dlp YouTube PO Token fetch policy: `never`, `auto`, or `always`. Useful only when a PO Token provider plugin/runtime is installed. |
 | `YOUTUBE_INCLUDE_MISSING_POT_FORMATS` | Set `true` to allow yt-dlp to expose YouTube formats skipped because a PO Token is missing. These formats may still fail with 403. |
 | `YOUTUBE_USE_AD_PLAYBACK_CONTEXT` | Set `true` to pass yt-dlp's YouTube `use_ad_playback_context` extractor argument. Experimental and off by default. |
+| `YOUTUBE_PIPED_API_BASE_URLS` | Optional comma-separated Piped API base URLs for YouTube fallback after yt-dlp fails. Use instances you operate or have permission to use. |
+| `YOUTUBE_INVIDIOUS_BASE_URLS` | Optional comma-separated Invidious base URLs for YouTube fallback after yt-dlp fails. Use instances you operate or have permission to use. |
+| `YOUTUBE_MIRROR_REGION` | Region hint for Invidious API fallback, defaults to `US`. |
+| `YOUTUBE_MIRROR_TIMEOUT_SECONDS` | Timeout for Piped/Invidious API and media downloads, defaults to `300`. |
 | `SOCIAL_DOWNLOAD_PROXY_URL` | Optional HTTP/HTTPS/SOCKS proxy URL passed to yt-dlp. Use only with infrastructure you operate or are allowed to use. |
 | `SOCIAL_DOWNLOAD_SOURCE_ADDRESS` | Optional local source address passed to yt-dlp. Mostly useful for forcing IPv4/IPv6 behavior in environments that support it. |
 | `SOCIAL_DOWNLOAD_USER_AGENT` | Optional User-Agent override for yt-dlp requests. Defaults to a desktop Chrome-like value. |
@@ -372,6 +376,8 @@ If the problem is Cloud Run egress, browser/TLS fingerprinting, transient provid
 ```
 
 If every built-in anonymous path fails and `COBALT_API_BASE_URL` is configured, ReelVault calls a Cobalt API instance as a server-side fallback. Cobalt can return a proxied tunnel, redirect, picker, or error response; ReelVault accepts tunnel/redirect responses and the first video item from picker responses. Cobalt software is free/open-source, but running it is not automatically free: you pay or consume free-tier quota for the host, bandwidth, and any egress. Do not rely on public Cobalt instances unless you operate them or have permission.
+
+For YouTube only, `YOUTUBE_PIPED_API_BASE_URLS` and `YOUTUBE_INVIDIOUS_BASE_URLS` add another no-cookie fallback after yt-dlp fails and before Cobalt. These call unauthenticated Piped `/streams/{videoId}` or Invidious `/api/v1/videos/{videoId}?local=true` APIs and download a progressive MP4 stream through the configured instance. Public instances may be blocked, rate limited, or disallow heavy use; use your own instance or one where you have permission.
 
 Some provider URLs can still fail because platforms rate limit datacenter IPs, change APIs, require login for specific content, or block anonymous access. ReelVault records these as `download_failed` and keeps the source URL for manual review instead of crashing the workflow.
 
@@ -672,7 +678,7 @@ The included tests cover social video URL extraction, Telegram pillar parsing/ca
 | YouTube download reports no supported JavaScript runtime | Use Docker or install Deno locally and make sure `deno` is on `PATH`. |
 | OpenAI transcription failed | Check `OPENAI_API_KEY`, audio file size, and `OPENAI_TRANSCRIPTION_MODEL`. Lower `MAX_AUDIO_SIZE_MB` only if your model limit is smaller. |
 | Provider download failed | This is expected for some links. The row will be saved for manual review. Try a fresh public video URL or set `ENABLE_VIDEO_DOWNLOAD=false` if you only want URL tracking. |
-| Provider works locally but fails on Cloud Run | Datacenter IPs are blocked more often. ReelVault retries several no-cookie YouTube client paths, anonymous Visitor Data, TikTok mobile API options, Instagram URL variants, and optional Cobalt fallback automatically when configured. Some links may still need Telegram upload fallback, a configured PO Token/provider, `YT_DLP_IMPERSONATE_CLIENT`, `SOCIAL_DOWNLOAD_PROXY_URL`, custom headers, higher `YT_DLP_*_RETRIES`, slower `YT_DLP_SLEEP_*` pacing, changed network egress, or intentionally enabled cookie fallback with `ENABLE_AUTH_COOKIES=true`. |
+| Provider works locally but fails on Cloud Run | Datacenter IPs are blocked more often. ReelVault retries several no-cookie YouTube client paths, anonymous Visitor Data, TikTok mobile API options, Instagram URL variants, optional Piped/Invidious YouTube mirrors, and optional Cobalt fallback automatically when configured. Some links may still need Telegram upload fallback, a configured PO Token/provider, `YT_DLP_IMPERSONATE_CLIENT`, `SOCIAL_DOWNLOAD_PROXY_URL`, custom headers, higher `YT_DLP_*_RETRIES`, slower `YT_DLP_SLEEP_*` pacing, changed network egress, or intentionally enabled cookie fallback with `ENABLE_AUTH_COOKIES=true`. |
 | Telegram upload fallback fails | Check `ENABLE_TELEGRAM_MEDIA_FALLBACK`, file size, and whether Telegram Bot API can provide the uploaded file. Try sending the media as a document if sending as video fails. |
 
 ## How the Workflow Handles Failures
