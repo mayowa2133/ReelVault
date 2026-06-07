@@ -330,23 +330,59 @@ class DownloaderService:
         initial_reason: str,
     ) -> tuple[dict[str, Any], Path | None, str | None]:
         attempt_errors = [("default", initial_reason)]
+        fallback_urls: list[tuple[str, str]] = [("default", url)]
 
-        for strategy in TIKTOK_NO_AUTH_FALLBACK_STRATEGIES:
+        if is_tiktok_short_url(url):
             try:
-                fallback_options = self._tiktok_no_auth_fallback_options(options, strategy)
-                info, file_path = self._download_with_options(url, output_dir, fallback_options)
-                logger.warning(
-                    "tiktok_download_succeeded_with_mobile_api_fallback",
-                    extra={"url": url, "strategy": strategy.name},
+                redirect_url = fetch_tiktok_redirect_url(
+                    url,
+                    timeout_seconds=self.settings.request_timeout_seconds,
+                    user_agent=self._yt_dlp_user_agent(),
                 )
-                return info, file_path, None
-            except Exception as fallback_exc:
-                fallback_reason = public_error_message(fallback_exc)
-                attempt_errors.append((strategy.name, fallback_reason))
-                logger.warning(
-                    "tiktok_mobile_api_fallback_failed",
-                    extra={"url": url, "strategy": strategy.name, "error": fallback_reason},
-                )
+                if redirect_url:
+                    fallback_urls = dedupe_named_urls(
+                        [
+                            ("tiktok_short_redirect_url", redirect_url),
+                            *fallback_urls,
+                        ]
+                    )
+                    try:
+                        info, file_path = self._download_with_options(redirect_url, output_dir, dict(options))
+                        logger.warning(
+                            "tiktok_download_succeeded_with_redirect_fallback",
+                            extra={"url": url, "redirect_url": redirect_url},
+                        )
+                        return info, file_path, None
+                    except Exception as redirect_download_exc:
+                        redirect_download_reason = public_error_message(redirect_download_exc)
+                        attempt_errors.append(("tiktok_short_redirect_url", redirect_download_reason))
+                        logger.warning(
+                            "tiktok_short_redirect_download_failed",
+                            extra={"url": url, "redirect_url": redirect_url, "error": redirect_download_reason},
+                        )
+            except Exception as redirect_exc:
+                redirect_reason = public_error_message(redirect_exc)
+                attempt_errors.append(("tiktok_short_redirect_url", redirect_reason))
+                logger.warning("tiktok_short_redirect_fallback_failed", extra={"url": url, "error": redirect_reason})
+
+        for target_name, target_url in fallback_urls:
+            for strategy in TIKTOK_NO_AUTH_FALLBACK_STRATEGIES:
+                attempt_name = strategy.name if target_name == "default" else f"{target_name}_{strategy.name}"
+                try:
+                    fallback_options = self._tiktok_no_auth_fallback_options(options, strategy)
+                    info, file_path = self._download_with_options(target_url, output_dir, fallback_options)
+                    logger.warning(
+                        "tiktok_download_succeeded_with_mobile_api_fallback",
+                        extra={"url": target_url, "original_url": url, "strategy": attempt_name},
+                    )
+                    return info, file_path, None
+                except Exception as fallback_exc:
+                    fallback_reason = public_error_message(fallback_exc)
+                    attempt_errors.append((attempt_name, fallback_reason))
+                    logger.warning(
+                        "tiktok_mobile_api_fallback_failed",
+                        extra={"url": target_url, "original_url": url, "strategy": attempt_name, "error": fallback_reason},
+                    )
 
         return {}, None, (
             f"{initial_reason}. TikTok no-auth mobile API fallback attempts also failed: "
@@ -915,6 +951,44 @@ def fetch_instagram_redirect_url(url: str, timeout_seconds: int, user_agent: str
     if provider_host(redirect_url) == "instagram.com" and not is_instagram_share_url(redirect_url):
         return redirect_url
     return None
+
+
+def is_tiktok_short_url(url: str) -> bool:
+    parsed = urlsplit(url)
+    host = parsed.netloc.lower().removeprefix("www.")
+    parts = [part for part in parsed.path.split("/") if part]
+    if not parts:
+        return False
+    if host in {"vm.tiktok.com", "vt.tiktok.com"}:
+        return True
+    return host in {"tiktok.com", "m.tiktok.com"} and parts[0].lower() in {"t", "v"}
+
+
+def fetch_tiktok_redirect_url(url: str, timeout_seconds: int, user_agent: str) -> str | None:
+    if not is_tiktok_short_url(url):
+        return None
+
+    headers = {"User-Agent": user_agent, "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"}
+    with httpx.Client(timeout=timeout_seconds, follow_redirects=True, headers=headers) as client:
+        response = client.get(url)
+        response.raise_for_status()
+
+    redirect_url = str(response.url).split("?", 1)[0].split("#", 1)[0].rstrip("/")
+    if provider_host(redirect_url) in {"tiktok.com", "m.tiktok.com"} and not is_tiktok_short_url(redirect_url):
+        return redirect_url
+    return None
+
+
+def dedupe_named_urls(named_urls: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    seen: set[str] = set()
+    deduped: list[tuple[str, str]] = []
+    for name, url in named_urls:
+        normalized_url = url.rstrip("/")
+        if normalized_url in seen:
+            continue
+        seen.add(normalized_url)
+        deduped.append((name, url))
+    return deduped
 
 
 def summarize_attempt_errors(attempt_errors: list[tuple[str, str]]) -> str:

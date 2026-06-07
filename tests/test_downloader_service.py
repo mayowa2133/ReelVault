@@ -6,8 +6,10 @@ from app.services.downloader_service import (
     YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES,
     fetch_anonymous_youtube_visitor_data,
     fetch_instagram_redirect_url,
+    fetch_tiktok_redirect_url,
     instagram_fallback_urls,
     is_instagram_share_url,
+    is_tiktok_short_url,
     parse_extractor_args_json,
     should_retry_instagram_with_url_variants,
     should_retry_tiktok_with_mobile_api,
@@ -308,6 +310,43 @@ def test_tiktok_private_error_is_not_retryable_with_mobile_api():
     )
 
 
+def test_tiktok_short_url_detection():
+    assert is_tiktok_short_url("https://vm.tiktok.com/ZMabc123/")
+    assert is_tiktok_short_url("https://vt.tiktok.com/ZMabc123/")
+    assert is_tiktok_short_url("https://www.tiktok.com/t/ZMabc123/")
+    assert is_tiktok_short_url("https://m.tiktok.com/v/7253412088251534594.html")
+    assert not is_tiktok_short_url("https://www.tiktok.com/@creator/video/7253412088251534594")
+
+
+def test_fetch_tiktok_redirect_url_returns_canonical_video(monkeypatch):
+    class FakeResponse:
+        url = "https://www.tiktok.com/@creator/video/7253412088251534594?is_from_webapp=1"
+
+        def raise_for_status(self):
+            return None
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def get(self, url):
+            assert url == "https://vm.tiktok.com/ZMabc123/"
+            return FakeResponse()
+
+    monkeypatch.setattr("app.services.downloader_service.httpx.Client", FakeClient)
+
+    assert (
+        fetch_tiktok_redirect_url("https://vm.tiktok.com/ZMabc123/", timeout_seconds=10, user_agent="UA")
+        == "https://www.tiktok.com/@creator/video/7253412088251534594"
+    )
+
+
 def test_instagram_url_variant_error_is_retryable():
     assert should_retry_instagram_with_url_variants(
         "https://www.instagram.com/reel/ABC123/",
@@ -419,6 +458,35 @@ def test_downloader_retries_tiktok_with_mobile_api_fallback(tmp_path, monkeypatc
     assert result.file_path == output_file
     assert len(calls) == 2
     assert calls[1]["extractor_args"]["tiktok"]["app_info"][0].endswith("/musical_ly/35.1.3/2023501030/0")
+
+
+def test_downloader_resolves_tiktok_short_url_before_mobile_api_fallback(tmp_path, monkeypatch):
+    service = DownloaderService(Settings())
+    calls = []
+    output_file = tmp_path / "video.mp4"
+    output_file.write_bytes(b"video")
+    canonical_url = "https://www.tiktok.com/@creator/video/7253412088251534594"
+
+    def fake_download(url, output_dir, options):
+        calls.append((url, options))
+        if len(calls) <= 2:
+            raise RuntimeError("Video not available, status code 0")
+        return {"id": "7253412088251534594", "title": "TikTok", "uploader": "creator"}, output_file
+
+    monkeypatch.setattr(service, "_download_with_options", fake_download)
+    monkeypatch.setattr(
+        "app.services.downloader_service.fetch_tiktok_redirect_url",
+        lambda url, timeout_seconds, user_agent: canonical_url,
+    )
+
+    result = service.download("https://vm.tiktok.com/ZMabc123/", tmp_path)
+
+    assert result.success is True
+    assert result.file_path == output_file
+    assert calls[0][0] == "https://vm.tiktok.com/ZMabc123/"
+    assert calls[1][0] == canonical_url
+    assert calls[2][0] == canonical_url
+    assert calls[2][1]["extractor_args"]["tiktok"]["app_info"][0].endswith("/musical_ly/35.1.3/2023501030/0")
 
 
 def test_downloader_retries_instagram_with_url_variants(tmp_path, monkeypatch):
