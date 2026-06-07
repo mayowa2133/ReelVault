@@ -125,8 +125,8 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `YOUTUBE_FETCH_POT_POLICY` | Optional yt-dlp YouTube PO Token fetch policy: `never`, `auto`, or `always`. Useful only when a PO Token provider plugin/runtime is installed. |
 | `YOUTUBE_INCLUDE_MISSING_POT_FORMATS` | Set `true` to allow yt-dlp to expose YouTube formats skipped because a PO Token is missing. These formats may still fail with 403. |
 | `YOUTUBE_USE_AD_PLAYBACK_CONTEXT` | Set `true` to pass yt-dlp's YouTube `use_ad_playback_context` extractor argument. Experimental and off by default. |
-| `YOUTUBE_POT_BGUTIL_BASE_URL` | Optional base URL for the `bgutil-ytdlp-pot-provider` HTTP server, mapped to yt-dlp's `youtubepot-bgutilhttp:base_url` extractor argument. |
-| `YOUTUBE_POT_BGUTIL_SCRIPT_SERVER_HOME` | Optional path to a local `bgutil-ytdlp-pot-provider/server` checkout for script mode. The Docker image sets this to `/opt/bgutil-ytdlp-pot-provider/server`. |
+| `YOUTUBE_POT_BGUTIL_BASE_URL` | Optional base URL for the `bgutil-ytdlp-pot-provider` HTTP server, mapped to yt-dlp's `youtubepot-bgutilhttp:base_url` extractor argument. The Docker image starts a local provider and sets this to `http://127.0.0.1:4416`. |
+| `YOUTUBE_POT_BGUTIL_SCRIPT_SERVER_HOME` | Optional path to a local `bgutil-ytdlp-pot-provider/server` checkout. The Docker image sets this to `/opt/bgutil-ytdlp-pot-provider/server` and uses it to start the local HTTP provider. |
 | `YOUTUBE_PIPED_API_BASE_URLS` | Optional comma-separated Piped API base URLs for YouTube fallback after yt-dlp fails. Use instances you operate or have permission to use. |
 | `YOUTUBE_INVIDIOUS_BASE_URLS` | Optional comma-separated Invidious base URLs for YouTube fallback after yt-dlp fails. Use instances you operate or have permission to use. |
 | `YOUTUBE_MIRROR_REGION` | Region hint for Invidious API fallback, defaults to `US`. |
@@ -367,7 +367,7 @@ ReelVault uses yt-dlp anonymously by default for public YouTube, Instagram media
 
 For YouTube bot-check responses, ReelVault automatically tries a no-auth fallback chain. It retries with yt-dlp's mobile web player client while skipping initial YouTube webpage/config requests, then tries explicit Android/iOS clients, broader YouTube client probing, anonymous YouTube Visitor Data, and Visitor Data retries while skipping the watch page and config requests. If `YOUTUBE_PO_TOKEN` is set, it also tries configured PO Token strategies. `YOUTUBE_FETCH_POT_POLICY`, `YOUTUBE_INCLUDE_MISSING_POT_FORMATS`, and `YOUTUBE_USE_AD_PLAYBACK_CONTEXT` expose the remaining yt-dlp YouTube PO-token knobs for controlled experiments. These paths follow yt-dlp's documented no-cookie Visitor Data and PO Token hooks. They can work around some Cloud Run datacenter IP challenges without account cookies, but they are still not guaranteed for every URL.
 
-yt-dlp currently recommends PO Token provider plugins instead of manually copying PO tokens because YouTube can bind tokens to each video. The Docker image installs the pinned `bgutil-ytdlp-pot-provider` plugin and matching Deno script provider by default, sets `YOUTUBE_FETCH_POT_POLICY=always`, and points `YOUTUBE_POT_BGUTIL_SCRIPT_SERVER_HOME` at the packaged provider. This is not account authentication, but it does add third-party code and can still fail when YouTube blocks the Cloud Run IP or changes attestation.
+yt-dlp currently recommends PO Token provider plugins instead of manually copying PO tokens because YouTube can bind tokens to each video. The Docker image installs the pinned `bgutil-ytdlp-pot-provider` plugin and matching Deno provider by default, starts the local provider HTTP server on `127.0.0.1:4416`, sets `YOUTUBE_FETCH_POT_POLICY=always`, and points yt-dlp at that provider with `YOUTUBE_POT_BGUTIL_BASE_URL`. This is not account authentication, but it does add third-party code and can still fail when YouTube blocks the Cloud Run IP or changes attestation.
 
 For TikTok failures, ReelVault resolves short `vm.tiktok.com`, `vt.tiktok.com`, `/t/...`, and `/v/...` links to their canonical video URL before retrying, then retries yt-dlp with TikTok's mobile API extractor arguments: generated install/device IDs, alternate app profiles, and alternate API hostnames. For Instagram failures, ReelVault accepts `/reel/`, `/reels/`, `/p/`, `/tv/`, and matching share URLs, retries common URL/embed variants, and resolves `instagram.com/share/...` redirects before retrying. These are anonymous public-media fallbacks; private, follower-only, expired, removed, or login-only content will still fail.
 
@@ -387,7 +387,7 @@ Some provider URLs can still fail because platforms rate limit datacenter IPs, c
 
 Build-time yt-dlp overrides:
 
-The default Docker build installs the pinned `yt-dlp[default,curl-cffi]` version from `requirements.txt`, then applies `YT_DLP_PACKAGE_SPEC`, which defaults to the official yt-dlp source snapshot generated from `yt-dlp/yt-dlp@acf8ab7` in the May 25, 2026 master build. It also installs `bgutil-ytdlp-pot-provider==1.3.1` plus the matching Deno script provider into `/opt/bgutil-ytdlp-pot-provider/server` for YouTube PO-token generation. If a provider breaks before the next pinned release, rebuild with another trusted override:
+The default Docker build installs the pinned `yt-dlp[default,curl-cffi]` version from `requirements.txt`, then applies `YT_DLP_PACKAGE_SPEC`, which defaults to the official yt-dlp source snapshot generated from `yt-dlp/yt-dlp@acf8ab7` in the May 25, 2026 master build. It also installs `bgutil-ytdlp-pot-provider==1.3.1` plus the matching Deno provider into `/opt/bgutil-ytdlp-pot-provider/server` for YouTube PO-token generation. If a provider breaks before the next pinned release, rebuild with another trusted override:
 
 ```bash
 docker build \
@@ -403,7 +403,7 @@ docker build \
   -t reelvault .
 ```
 
-Only install packages you trust. PO Token provider plugins can improve YouTube reliability, but they add third-party code and may require their own runtime services or browser infrastructure. After deployment, `/health` reports `yt_dlp_plugin_package_specs`, `youtube_po_token_provider_version`, `youtube_po_token_provider_plugins`, and whether the bgutil HTTP or script provider settings are configured. Set `YOUTUBE_POT_BGUTIL_BASE_URL` only when using a separate HTTP provider server instead of the packaged script provider.
+Only install packages you trust. PO Token provider plugins can improve YouTube reliability, but they add third-party code and may require their own runtime services or browser infrastructure. After deployment, `/health` reports `yt_dlp_plugin_package_specs`, `youtube_po_token_provider_version`, `youtube_po_token_provider_plugins`, and whether the bgutil HTTP or script provider settings are configured. Override `YOUTUBE_POT_BGUTIL_BASE_URL` only when using a separate provider server instead of the packaged local provider.
 
 Optional cookie fallback:
 
@@ -679,7 +679,7 @@ The included tests cover social video URL extraction, Telegram pillar parsing/ca
 | Used rows do not immediately reorder | If any row is still queued or processing, ReelVault skips archive sorting until it is safe to move rows. Wait for processing to finish or toggle `Used` again. |
 | Google Doc script creation failed | Enable the Google Docs API, rerun OAuth setup for the Docs scope, and verify the authorized account can create files in the Drive folder. |
 | `FFmpeg is not installed` | Use Docker or install FFmpeg locally and make sure `ffmpeg` is on `PATH`. |
-| YouTube download reports no supported JavaScript runtime | Use Docker or install Deno locally and make sure `deno` is on `PATH`. |
+| YouTube download reports no supported JavaScript runtime | Use Docker or install Deno locally and make sure `deno` is on `PATH`. In Docker, confirm `/health` shows the bgutil provider settings and use `/diagnostics/download` with debug logging if the local provider is not reachable. |
 | OpenAI transcription failed | Check `OPENAI_API_KEY`, audio file size, and `OPENAI_TRANSCRIPTION_MODEL`. Lower `MAX_AUDIO_SIZE_MB` only if your model limit is smaller. |
 | Provider download failed | This is expected for some links. The row will be saved for manual review. Try a fresh public video URL or set `ENABLE_VIDEO_DOWNLOAD=false` if you only want URL tracking. |
 | Provider works locally but fails on Cloud Run | Datacenter IPs are blocked more often. ReelVault retries several no-cookie YouTube client paths, anonymous Visitor Data, TikTok mobile API options, Instagram URL variants, optional Piped/Invidious YouTube mirrors including adaptive stream merge, and optional Cobalt fallback automatically when configured. Some links may still need Telegram upload fallback, a configured PO Token/provider, `YT_DLP_IMPERSONATE_CLIENT`, `SOCIAL_DOWNLOAD_PROXY_URL`, custom headers, higher `YT_DLP_*_RETRIES`, slower `YT_DLP_SLEEP_*` pacing, changed network egress, or intentionally enabled cookie fallback with `ENABLE_AUTH_COOKIES=true`. |
