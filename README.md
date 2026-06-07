@@ -126,7 +126,8 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `YOUTUBE_INCLUDE_MISSING_POT_FORMATS` | Set `true` to allow yt-dlp to expose YouTube formats skipped because a PO Token is missing. These formats may still fail with 403. |
 | `YOUTUBE_USE_AD_PLAYBACK_CONTEXT` | Set `true` to pass yt-dlp's YouTube `use_ad_playback_context` extractor argument. Experimental and off by default. |
 | `YOUTUBE_POT_BGUTIL_BASE_URL` | Optional base URL for the `bgutil-ytdlp-pot-provider` HTTP server, mapped to yt-dlp's `youtubepot-bgutilhttp:base_url` extractor argument. The Docker image starts a local provider and sets this to `http://127.0.0.1:4416`. |
-| `YOUTUBE_POT_BGUTIL_SCRIPT_SERVER_HOME` | Optional path to a local `bgutil-ytdlp-pot-provider/server` checkout. The Docker image sets this to `/opt/bgutil-ytdlp-pot-provider/server` and uses it to start the local HTTP provider. |
+| `YOUTUBE_POT_BGUTIL_SCRIPT_SERVER_HOME` | Optional path to a local `bgutil-ytdlp-pot-provider/server` checkout for yt-dlp script-provider mode. The Docker image does not set this by default because it uses the local HTTP provider. |
+| `BGUTIL_PROVIDER_HOME` | Docker entrypoint path for the packaged local `bgutil-ytdlp-pot-provider/server` checkout, defaults to `/opt/bgutil-ytdlp-pot-provider/server`. |
 | `YOUTUBE_PIPED_API_BASE_URLS` | Optional comma-separated Piped API base URLs for YouTube fallback after yt-dlp fails. Use instances you operate or have permission to use. |
 | `YOUTUBE_INVIDIOUS_BASE_URLS` | Optional comma-separated Invidious base URLs for YouTube fallback after yt-dlp fails. Use instances you operate or have permission to use. |
 | `YOUTUBE_MIRROR_REGION` | Region hint for Invidious API fallback, defaults to `US`. |
@@ -403,7 +404,7 @@ docker build \
   -t reelvault .
 ```
 
-Only install packages you trust. PO Token provider plugins can improve YouTube reliability, but they add third-party code and may require their own runtime services or browser infrastructure. After deployment, `/health` reports `yt_dlp_plugin_package_specs`, `youtube_po_token_provider_version`, `youtube_po_token_provider_plugins`, and whether the bgutil HTTP or script provider settings are configured. Override `YOUTUBE_POT_BGUTIL_BASE_URL` only when using a separate provider server instead of the packaged local provider.
+Only install packages you trust. PO Token provider plugins can improve YouTube reliability, but they add third-party code and may require their own runtime services or browser infrastructure. After deployment, `/health` reports `yt_dlp_plugin_package_specs`, `youtube_po_token_provider_version`, `youtube_po_token_provider_plugins`, and whether the bgutil HTTP or script provider settings are configured. In the default Docker image, the HTTP setting should be configured and the script setting can remain unset. Override `YOUTUBE_POT_BGUTIL_BASE_URL` only when using a separate provider server instead of the packaged local provider.
 
 Optional cookie fallback:
 
