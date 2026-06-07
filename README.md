@@ -126,6 +126,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `YOUTUBE_INCLUDE_MISSING_POT_FORMATS` | Set `true` to allow yt-dlp to expose YouTube formats skipped because a PO Token is missing. These formats may still fail with 403. |
 | `YOUTUBE_USE_AD_PLAYBACK_CONTEXT` | Set `true` to pass yt-dlp's YouTube `use_ad_playback_context` extractor argument. Experimental and off by default. |
 | `YOUTUBE_POT_BGUTIL_BASE_URL` | Optional base URL for the `bgutil-ytdlp-pot-provider` HTTP server, mapped to yt-dlp's `youtubepot-bgutilhttp:base_url` extractor argument. |
+| `YOUTUBE_POT_BGUTIL_SCRIPT_SERVER_HOME` | Optional path to a local `bgutil-ytdlp-pot-provider/server` checkout for script mode. The Docker image sets this to `/opt/bgutil-ytdlp-pot-provider/server`. |
 | `YOUTUBE_PIPED_API_BASE_URLS` | Optional comma-separated Piped API base URLs for YouTube fallback after yt-dlp fails. Use instances you operate or have permission to use. |
 | `YOUTUBE_INVIDIOUS_BASE_URLS` | Optional comma-separated Invidious base URLs for YouTube fallback after yt-dlp fails. Use instances you operate or have permission to use. |
 | `YOUTUBE_MIRROR_REGION` | Region hint for Invidious API fallback, defaults to `US`. |
@@ -366,7 +367,7 @@ ReelVault uses yt-dlp anonymously by default for public YouTube, Instagram media
 
 For YouTube bot-check responses, ReelVault automatically tries a no-auth fallback chain. It retries with yt-dlp's mobile web player client while skipping initial YouTube webpage/config requests, then tries explicit Android/iOS clients, broader YouTube client probing, anonymous YouTube Visitor Data, and Visitor Data retries while skipping the watch page and config requests. If `YOUTUBE_PO_TOKEN` is set, it also tries configured PO Token strategies. `YOUTUBE_FETCH_POT_POLICY`, `YOUTUBE_INCLUDE_MISSING_POT_FORMATS`, and `YOUTUBE_USE_AD_PLAYBACK_CONTEXT` expose the remaining yt-dlp YouTube PO-token knobs for controlled experiments. These paths follow yt-dlp's documented no-cookie Visitor Data and PO Token hooks. They can work around some Cloud Run datacenter IP challenges without account cookies, but they are still not guaranteed for every URL.
 
-yt-dlp currently recommends PO Token provider plugins instead of manually copying PO tokens because YouTube can bind tokens to each video. The Docker build supports trusted plugin packages with `YT_DLP_PLUGIN_PACKAGE_SPECS`; for the common `bgutil-ytdlp-pot-provider` HTTP-server setup, install the plugin at build time, set `YOUTUBE_FETCH_POT_POLICY=always` or `auto`, and set `YOUTUBE_POT_BGUTIL_BASE_URL` if the provider server is not reachable at the plugin default. This is not account authentication, but it does add third-party code and usually a separate token-provider runtime.
+yt-dlp currently recommends PO Token provider plugins instead of manually copying PO tokens because YouTube can bind tokens to each video. The Docker image installs the pinned `bgutil-ytdlp-pot-provider` plugin and matching Deno script provider by default, sets `YOUTUBE_FETCH_POT_POLICY=auto`, and points `YOUTUBE_POT_BGUTIL_SCRIPT_SERVER_HOME` at the packaged provider. This is not account authentication, but it does add third-party code and can still fail when YouTube blocks the Cloud Run IP or changes attestation.
 
 For TikTok failures, ReelVault resolves short `vm.tiktok.com`, `vt.tiktok.com`, `/t/...`, and `/v/...` links to their canonical video URL before retrying, then retries yt-dlp with TikTok's mobile API extractor arguments: generated install/device IDs, alternate app profiles, and alternate API hostnames. For Instagram failures, ReelVault accepts `/reel/`, `/reels/`, `/p/`, `/tv/`, and matching share URLs, retries common URL/embed variants, and resolves `instagram.com/share/...` redirects before retrying. These are anonymous public-media fallbacks; private, follower-only, expired, removed, or login-only content will still fail.
 
@@ -386,7 +387,7 @@ Some provider URLs can still fail because platforms rate limit datacenter IPs, c
 
 Build-time yt-dlp overrides:
 
-The default Docker build installs the pinned `yt-dlp[default,curl-cffi]` version from `requirements.txt`, then applies `YT_DLP_PACKAGE_SPEC`, which defaults to the official yt-dlp source snapshot generated from `yt-dlp/yt-dlp@acf8ab7` in the May 25, 2026 master build. If a provider breaks before the next pinned release, rebuild with another trusted override:
+The default Docker build installs the pinned `yt-dlp[default,curl-cffi]` version from `requirements.txt`, then applies `YT_DLP_PACKAGE_SPEC`, which defaults to the official yt-dlp source snapshot generated from `yt-dlp/yt-dlp@acf8ab7` in the May 25, 2026 master build. It also installs `bgutil-ytdlp-pot-provider==1.3.1` plus the matching Deno script provider into `/opt/bgutil-ytdlp-pot-provider/server` for YouTube PO-token generation. If a provider breaks before the next pinned release, rebuild with another trusted override:
 
 ```bash
 docker build \
@@ -394,7 +395,7 @@ docker build \
   -t reelvault .
 ```
 
-You can also install trusted yt-dlp plugin packages at build time:
+You can override trusted yt-dlp plugin packages at build time:
 
 ```bash
 docker build \
@@ -402,7 +403,7 @@ docker build \
   -t reelvault .
 ```
 
-Only install packages you trust. PO Token provider plugins can improve YouTube reliability, but they add third-party code and may require their own runtime services or browser infrastructure. After deployment, `/health` reports `yt_dlp_plugin_package_specs` and `youtube_po_token_provider_plugins`; for `bgutil-ytdlp-pot-provider`, also set `YOUTUBE_FETCH_POT_POLICY=always` or `auto`, and set `YOUTUBE_POT_BGUTIL_BASE_URL` when using a non-default provider server URL.
+Only install packages you trust. PO Token provider plugins can improve YouTube reliability, but they add third-party code and may require their own runtime services or browser infrastructure. After deployment, `/health` reports `yt_dlp_plugin_package_specs`, `youtube_po_token_provider_version`, `youtube_po_token_provider_plugins`, and whether the bgutil HTTP or script provider settings are configured. Set `YOUTUBE_POT_BGUTIL_BASE_URL` only when using a separate HTTP provider server instead of the packaged script provider.
 
 Optional cookie fallback:
 

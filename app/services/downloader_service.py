@@ -553,6 +553,10 @@ class DownloaderService:
             base_args["youtube"] = youtube_args
         if self.settings.youtube_pot_bgutil_base_url:
             base_args["youtubepot-bgutilhttp"] = {"base_url": [self.settings.youtube_pot_bgutil_base_url]}
+        if self.settings.youtube_pot_bgutil_script_server_home:
+            base_args["youtubepot-bgutilscript"] = {
+                "server_home": [self.settings.youtube_pot_bgutil_script_server_home],
+            }
 
         custom_args = parse_extractor_args_json(self.settings.social_extractor_args_json)
         return merge_extractor_args(base_args, custom_args)
@@ -651,6 +655,7 @@ def downloader_runtime_info(settings: Settings) -> dict[str, Any]:
         "yt_dlp_version": version,
         "yt_dlp_package_spec": os.getenv("REELVAULT_YT_DLP_PACKAGE_SPEC") or None,
         "yt_dlp_plugin_package_specs": os.getenv("REELVAULT_YT_DLP_PLUGIN_PACKAGE_SPECS") or None,
+        "youtube_po_token_provider_version": os.getenv("REELVAULT_YOUTUBE_PO_TOKEN_PROVIDER_VERSION") or None,
         "auth_cookies_enabled": settings.enable_auth_cookies,
         "cobalt_configured": bool(settings.cobalt_api_base_url),
         "proxy_configured": bool(settings.social_download_proxy_url),
@@ -660,6 +665,7 @@ def downloader_runtime_info(settings: Settings) -> dict[str, Any]:
         "youtube_po_token_configured": bool(settings.youtube_po_token),
         "youtube_fetch_pot_policy": settings.youtube_fetch_pot_policy,
         "youtube_pot_bgutil_base_url_configured": bool(settings.youtube_pot_bgutil_base_url),
+        "youtube_pot_bgutil_script_server_home_configured": bool(settings.youtube_pot_bgutil_script_server_home),
         "youtube_mirror_configured": bool(settings.youtube_piped_api_base_urls or settings.youtube_invidious_base_urls),
         "youtube_piped_configured": bool(settings.youtube_piped_api_base_urls),
         "youtube_invidious_configured": bool(settings.youtube_invidious_base_urls),

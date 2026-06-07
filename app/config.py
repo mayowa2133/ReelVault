@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     youtube_include_missing_pot_formats: bool = False
     youtube_use_ad_playback_context: bool = False
     youtube_pot_bgutil_base_url: str | None = None
+    youtube_pot_bgutil_script_server_home: str | None = None
     youtube_piped_api_base_urls: str | None = None
     youtube_invidious_base_urls: str | None = None
     youtube_mirror_region: str = "US"
@@ -108,6 +109,7 @@ class Settings(BaseSettings):
         "youtube_po_token",
         "youtube_fetch_pot_policy",
         "youtube_pot_bgutil_base_url",
+        "youtube_pot_bgutil_script_server_home",
         "youtube_piped_api_base_urls",
         "youtube_invidious_base_urls",
         "social_download_proxy_url",

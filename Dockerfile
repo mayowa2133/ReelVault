@@ -6,10 +6,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 ARG DENO_VERSION=2.3.6
 ARG YT_DLP_PACKAGE_SPEC="yt-dlp[default,curl-cffi] @ https://github.com/yt-dlp/yt-dlp/archive/acf8ab7.tar.gz"
-ARG YT_DLP_PLUGIN_PACKAGE_SPECS=""
+ARG YOUTUBE_PO_TOKEN_PROVIDER_VERSION=1.3.1
+ARG YOUTUBE_PO_TOKEN_PROVIDER_HOME=/opt/bgutil-ytdlp-pot-provider
+ARG YT_DLP_PLUGIN_PACKAGE_SPECS="bgutil-ytdlp-pot-provider==1.3.1"
 
 ENV REELVAULT_YT_DLP_PACKAGE_SPEC="${YT_DLP_PACKAGE_SPEC}" \
-    REELVAULT_YT_DLP_PLUGIN_PACKAGE_SPECS="${YT_DLP_PLUGIN_PACKAGE_SPECS}"
+    REELVAULT_YT_DLP_PLUGIN_PACKAGE_SPECS="${YT_DLP_PLUGIN_PACKAGE_SPECS}" \
+    REELVAULT_YOUTUBE_PO_TOKEN_PROVIDER_VERSION="${YOUTUBE_PO_TOKEN_PROVIDER_VERSION}" \
+    YOUTUBE_FETCH_POT_POLICY=auto \
+    YOUTUBE_POT_BGUTIL_SCRIPT_SERVER_HOME="${YOUTUBE_PO_TOKEN_PROVIDER_HOME}/server"
 
 WORKDIR /app
 
@@ -17,6 +22,14 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg ca-certificates curl unzip \
     && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh -s v${DENO_VERSION} \
     && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL "https://github.com/Brainicism/bgutil-ytdlp-pot-provider/archive/refs/tags/${YOUTUBE_PO_TOKEN_PROVIDER_VERSION}.zip" -o /tmp/bgutil-ytdlp-pot-provider.zip \
+    && unzip -q /tmp/bgutil-ytdlp-pot-provider.zip -d /tmp \
+    && rm -rf "${YOUTUBE_PO_TOKEN_PROVIDER_HOME}" \
+    && mv "/tmp/bgutil-ytdlp-pot-provider-${YOUTUBE_PO_TOKEN_PROVIDER_VERSION}" "${YOUTUBE_PO_TOKEN_PROVIDER_HOME}" \
+    && cd "${YOUTUBE_PO_TOKEN_PROVIDER_HOME}/server" \
+    && deno install --allow-scripts=npm:canvas --frozen \
+    && rm -f /tmp/bgutil-ytdlp-pot-provider.zip
 
 COPY requirements.txt .
 RUN pip install --upgrade pip \
