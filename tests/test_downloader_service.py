@@ -7,10 +7,12 @@ from app.services.downloader_service import (
     fetch_anonymous_youtube_visitor_data,
     fetch_instagram_redirect_url,
     fetch_tiktok_redirect_url,
+    compact_yt_dlp_debug_log,
     instagram_fallback_urls,
     is_instagram_share_url,
     is_tiktok_short_url,
     parse_extractor_args_json,
+    sanitize_yt_dlp_debug_message,
     should_retry_instagram_with_url_variants,
     should_retry_tiktok_with_mobile_api,
     should_try_cobalt_fallback,
@@ -143,6 +145,31 @@ def test_downloader_applies_bgutil_po_token_provider_base_url(tmp_path):
     assert options["extractor_args"]["youtubepot-bgutilscript"] == {
         "server_home": ["/opt/bgutil-ytdlp-pot-provider/server"],
     }
+
+
+def test_yt_dlp_debug_log_redacts_sensitive_values():
+    message = (
+        'debug: {"poToken":"secret-token"} '
+        "po_token=another-secret "
+        "https://example.test/videoplayback?pot=query-secret "
+        "Authorization: Bearer auth-secret\n"
+        "Cookie: session=secret-cookie"
+    )
+
+    sanitized = sanitize_yt_dlp_debug_message(message)
+
+    assert "secret-token" not in sanitized
+    assert "another-secret" not in sanitized
+    assert "query-secret" not in sanitized
+    assert "auth-secret" not in sanitized
+    assert "secret-cookie" not in sanitized
+    assert sanitized.count("[REDACTED]") == 5
+
+
+def test_yt_dlp_debug_log_compaction_keeps_tail():
+    compacted = compact_yt_dlp_debug_log(["alpha", "beta", "gamma"], max_chars=10)
+
+    assert compacted == "[truncated 6 chars]\nbeta\ngamma"
 
 
 def test_downloader_supports_any_impersonation_alias(tmp_path):

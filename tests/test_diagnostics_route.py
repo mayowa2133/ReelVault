@@ -39,10 +39,13 @@ def test_download_diagnostic_calls_downloader(tmp_path, monkeypatch):
     output_file = tmp_path / "video.mp4"
 
     class FakeDownloader:
-        def __init__(self, settings):
+        def __init__(self, settings, yt_dlp_debug_log=None):
             self.settings = settings
+            self.yt_dlp_debug_log = yt_dlp_debug_log
 
         def download(self, url: str, output_dir: Path) -> DownloadResult:
+            if self.yt_dlp_debug_log is not None:
+                self.yt_dlp_debug_log.append("debug line")
             output_file.write_bytes(b"video")
             return DownloadResult(
                 success=True,
@@ -70,11 +73,42 @@ def test_download_diagnostic_calls_downloader(tmp_path, monkeypatch):
     assert body["title"] == "Me at the zoo"
     assert body["file_size_bytes"] == 5
     assert body["downloader"]["yt_dlp_available"] is True
+    assert "yt_dlp_debug_log" not in body
+
+
+def test_download_diagnostic_can_include_debug_log(tmp_path, monkeypatch):
+    class FakeDownloader:
+        def __init__(self, settings, yt_dlp_debug_log=None):
+            self.settings = settings
+            self.yt_dlp_debug_log = yt_dlp_debug_log
+
+        def download(self, url: str, output_dir: Path) -> DownloadResult:
+            if self.yt_dlp_debug_log is not None:
+                self.yt_dlp_debug_log.append("debug: generated po_token=[REDACTED]")
+            return DownloadResult(success=False, status="download_failed", error_message="blocked")
+
+    monkeypatch.setattr("app.routes.diagnostics.DownloaderService", FakeDownloader)
+    client = build_client(Settings(task_request_secret="expected-secret", temp_dir=tmp_path))
+
+    response = client.post(
+        "/diagnostics/download",
+        json={
+            "url": "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+            "include_debug_log": True,
+            "debug_log_max_chars": 1000,
+        },
+        headers={"X-ReelVault-Task-Secret": "expected-secret"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert body["yt_dlp_debug_log"] == "debug: generated po_token=[REDACTED]"
 
 
 def test_download_diagnostic_returns_failed_result(tmp_path, monkeypatch):
     class FakeDownloader:
-        def __init__(self, settings):
+        def __init__(self, settings, yt_dlp_debug_log=None):
             self.settings = settings
 
         def download(self, url: str, output_dir: Path) -> DownloadResult:

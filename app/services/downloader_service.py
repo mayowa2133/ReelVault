@@ -161,8 +161,9 @@ TIKTOK_NO_AUTH_FALLBACK_STRATEGIES = (
 class DownloaderService:
     """Best-effort Reel downloader behind a replaceable abstraction."""
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, yt_dlp_debug_log: list[str] | None = None):
         self.settings = settings
+        self.yt_dlp_debug_log = yt_dlp_debug_log
 
     def download(self, url: str, output_dir: Path) -> DownloadResult:
         if not self.settings.enable_video_download:
@@ -520,6 +521,12 @@ class DownloaderService:
             if self.settings.yt_dlp_max_sleep_interval_seconds is not None:
                 options["max_sleep_interval"] = self.settings.yt_dlp_max_sleep_interval_seconds
 
+        if self.yt_dlp_debug_log is not None:
+            options["logger"] = YtDlpCaptureLogger(self.yt_dlp_debug_log)
+            options["verbose"] = True
+            options["quiet"] = False
+            options["no_warnings"] = False
+
         cookie_file = self._cookie_file(output_dir)
         if cookie_file:
             options["cookiefile"] = str(cookie_file)
@@ -719,6 +726,50 @@ def youtube_po_token_provider_runtime_info() -> dict[str, Any]:
             "youtube_po_token_provider_plugins": [],
             "youtube_po_token_provider_error": short_error(public_error_message(exc)),
         }
+
+
+class YtDlpCaptureLogger:
+    def __init__(self, lines: list[str]):
+        self.lines = lines
+
+    def debug(self, message: str) -> None:
+        self._append("debug", message)
+
+    def info(self, message: str) -> None:
+        self._append("info", message)
+
+    def warning(self, message: str) -> None:
+        self._append("warning", message)
+
+    def error(self, message: str) -> None:
+        self._append("error", message)
+
+    def _append(self, level: str, message: str) -> None:
+        self.lines.append(f"{level}: {sanitize_yt_dlp_debug_message(str(message))}")
+
+
+def sanitize_yt_dlp_debug_message(message: str) -> str:
+    replacements = (
+        (r'("poToken"\s*:\s*")[^"]+(")', r"\1[REDACTED]\2"),
+        (r"('poToken'\s*:\s*')[^']+(')", r"\1[REDACTED]\2"),
+        (r"(?i)(po[_-]?token\s*[:=]\s*)[^\s,;]+", r"\1[REDACTED]"),
+        (r"(?i)([?&]pot=)[^&\s]+", r"\1[REDACTED]"),
+        (r"(?i)(/pot/)[^/?#\s]+", r"\1[REDACTED]"),
+        (r"(?i)(Authorization:\s*)[^\n]+", r"\1[REDACTED]"),
+        (r"(?i)(Cookie:\s*)[^\n]+", r"\1[REDACTED]"),
+    )
+    sanitized = message
+    for pattern, replacement in replacements:
+        sanitized = re.sub(pattern, replacement, sanitized)
+    return sanitized
+
+
+def compact_yt_dlp_debug_log(lines: list[str], max_chars: int) -> str:
+    text = "\n".join(lines)
+    if len(text) <= max_chars:
+        return text
+    omitted_chars = len(text) - max_chars
+    return f"[truncated {omitted_chars} chars]\n{text[-max_chars:]}"
 
 
 def resolve_downloaded_path(info: dict[str, Any], output_dir: Path, ydl: Any) -> Path | None:
