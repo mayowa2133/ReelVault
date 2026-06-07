@@ -673,6 +673,7 @@ def downloader_runtime_info(settings: Settings) -> dict[str, Any]:
         "youtube_fetch_pot_policy": settings.youtube_fetch_pot_policy,
         "youtube_pot_bgutil_base_url_configured": bool(settings.youtube_pot_bgutil_base_url),
         "youtube_pot_bgutil_script_server_home_configured": bool(settings.youtube_pot_bgutil_script_server_home),
+        **youtube_pot_bgutil_http_provider_runtime_info(settings.youtube_pot_bgutil_base_url),
         "youtube_mirror_configured": bool(settings.youtube_piped_api_base_urls or settings.youtube_invidious_base_urls),
         "youtube_piped_configured": bool(settings.youtube_piped_api_base_urls),
         "youtube_invidious_configured": bool(settings.youtube_invidious_base_urls),
@@ -686,6 +687,36 @@ def downloader_runtime_info(settings: Settings) -> dict[str, Any]:
         "yt_dlp_socket_timeout_seconds": settings.yt_dlp_socket_timeout_seconds,
         **youtube_po_token_provider_runtime_info(),
     }
+
+
+def youtube_pot_bgutil_http_provider_runtime_info(base_url: str | None) -> dict[str, Any]:
+    if not base_url:
+        return {
+            "youtube_pot_bgutil_http_provider_reachable": None,
+            "youtube_pot_bgutil_http_provider_status": None,
+            "youtube_pot_bgutil_http_provider_version": None,
+            "youtube_pot_bgutil_http_provider_error": None,
+        }
+
+    try:
+        response = httpx.get(f"{base_url.rstrip('/')}/ping", timeout=0.75)
+        provider_version = None
+        if response.headers.get("content-type", "").startswith("application/json"):
+            provider_version = response.json().get("version")
+
+        return {
+            "youtube_pot_bgutil_http_provider_reachable": response.status_code == 200,
+            "youtube_pot_bgutil_http_provider_status": response.status_code,
+            "youtube_pot_bgutil_http_provider_version": provider_version,
+            "youtube_pot_bgutil_http_provider_error": None if response.status_code == 200 else short_error(response.text),
+        }
+    except Exception as exc:
+        return {
+            "youtube_pot_bgutil_http_provider_reachable": False,
+            "youtube_pot_bgutil_http_provider_status": None,
+            "youtube_pot_bgutil_http_provider_version": None,
+            "youtube_pot_bgutil_http_provider_error": short_error(public_error_message(exc)),
+        }
 
 
 @lru_cache(maxsize=1)

@@ -192,8 +192,52 @@ def test_downloader_runtime_info_includes_package_spec(monkeypatch):
     assert info["youtube_po_token_provider_version"] == "1.3.1"
     assert info["youtube_pot_bgutil_base_url_configured"] is False
     assert info["youtube_pot_bgutil_script_server_home_configured"] is False
+    assert info["youtube_pot_bgutil_http_provider_reachable"] is None
+    assert info["youtube_pot_bgutil_http_provider_status"] is None
+    assert info["youtube_pot_bgutil_http_provider_version"] is None
+    assert info["youtube_pot_bgutil_http_provider_error"] is None
     assert "youtube_po_token_provider_plugins_available" in info
     assert "youtube_po_token_provider_plugins" in info
+
+
+def test_downloader_runtime_info_pings_bgutil_http_provider(monkeypatch):
+    class FakeResponse:
+        status_code = 200
+        text = '{"version":"1.3.1"}'
+        headers = {"content-type": "application/json"}
+
+        def json(self):
+            return {"version": "1.3.1"}
+
+    calls = []
+
+    def fake_get(url, timeout):
+        calls.append((url, timeout))
+        return FakeResponse()
+
+    monkeypatch.setattr("app.services.downloader_service.httpx.get", fake_get)
+
+    info = downloader_runtime_info(Settings(youtube_pot_bgutil_base_url="http://127.0.0.1:4416"))
+
+    assert calls == [("http://127.0.0.1:4416/ping", 0.75)]
+    assert info["youtube_pot_bgutil_http_provider_reachable"] is True
+    assert info["youtube_pot_bgutil_http_provider_status"] == 200
+    assert info["youtube_pot_bgutil_http_provider_version"] == "1.3.1"
+    assert info["youtube_pot_bgutil_http_provider_error"] is None
+
+
+def test_downloader_runtime_info_reports_bgutil_http_provider_error(monkeypatch):
+    def fake_get(url, timeout):
+        raise TimeoutError("provider timeout")
+
+    monkeypatch.setattr("app.services.downloader_service.httpx.get", fake_get)
+
+    info = downloader_runtime_info(Settings(youtube_pot_bgutil_base_url="http://127.0.0.1:4416"))
+
+    assert info["youtube_pot_bgutil_http_provider_reachable"] is False
+    assert info["youtube_pot_bgutil_http_provider_status"] is None
+    assert info["youtube_pot_bgutil_http_provider_version"] is None
+    assert "provider timeout" in info["youtube_pot_bgutil_http_provider_error"]
 
 
 def test_downloader_merges_custom_extractor_args_json(tmp_path):
