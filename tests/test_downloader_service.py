@@ -1,14 +1,18 @@
 from app.config import Settings
 from app.services.downloader_service import (
     DownloaderService,
+    InstagramPublicDownloadResult,
     TIKTOK_NO_AUTH_FALLBACK_STRATEGIES,
     YOUTUBE_FALLBACK_FORMAT,
     YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES,
     X_NO_AUTH_FALLBACK_STRATEGIES,
+    download_instagram_public_media,
+    extract_instagram_public_media_urls,
     fetch_anonymous_youtube_visitor_data,
     fetch_instagram_redirect_url,
     fetch_tiktok_redirect_url,
     compact_yt_dlp_debug_log,
+    instagram_public_filename,
     instagram_fallback_urls,
     is_instagram_share_url,
     is_tiktok_short_url,
@@ -524,6 +528,96 @@ def test_instagram_share_url_detection():
     assert not is_instagram_share_url("https://www.instagram.com/reel/ABC123/")
 
 
+def test_extract_instagram_public_media_urls_parses_meta_and_escaped_json():
+    webpage = """
+    <html>
+      <meta property="og:video" content="https://cdn.example/one.mp4?x=1&amp;y=2">
+      <script>{"video_url":"https:\\/\\/cdn.example\\/two.mp4?x=1\\u0026y=2"}</script>
+    </html>
+    """
+
+    assert extract_instagram_public_media_urls(webpage) == [
+        "https://cdn.example/one.mp4?x=1&y=2",
+        "https://cdn.example/two.mp4?x=1&y=2",
+    ]
+
+
+def test_instagram_public_filename_uses_shortcode_and_safe_extension():
+    assert (
+        instagram_public_filename(
+            "https://www.instagram.com/reel/ABC123/",
+            "https://cdn.example/path/video.mp4?token=abc",
+        )
+        == "ABC123.mp4"
+    )
+    assert (
+        instagram_public_filename(
+            "https://www.instagram.com/share/reel/BA123xyz/",
+            "https://cdn.example/path/video.bin?token=abc",
+        )
+        == "BA123xyz.mp4"
+    )
+
+
+def test_download_instagram_public_media_downloads_og_video(tmp_path, monkeypatch):
+    class FakeResponse:
+        def __init__(self, text="", chunks=None):
+            self.text = text
+            self._chunks = chunks or []
+
+        def raise_for_status(self):
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def iter_bytes(self):
+            return iter(self._chunks)
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def get(self, url):
+            assert url == "https://www.instagram.com/reel/ABC123/"
+            return FakeResponse(
+                """
+                <meta property="og:title" content="A public reel">
+                <meta property="og:video" content="https://cdn.example/video.mp4?token=abc">
+                """
+            )
+
+        def stream(self, method, url, headers):
+            assert method == "GET"
+            assert url == "https://cdn.example/video.mp4?token=abc"
+            assert headers["Referer"] == "https://www.instagram.com/reel/ABC123/"
+            return FakeResponse(chunks=[b"vid", b"eo"])
+
+    monkeypatch.setattr("app.services.downloader_service.httpx.Client", FakeClient)
+
+    result = download_instagram_public_media(
+        "https://www.instagram.com/reel/ABC123/",
+        tmp_path,
+        Settings(max_video_size_mb=1),
+        user_agent="UA",
+    )
+
+    assert result.file_path.read_bytes() == b"video"
+    assert result.file_path.name == "ABC123.mp4"
+    assert result.info["extractor"] == "instagram_public"
+    assert result.info["title"] == "A public reel"
+    assert result.info["format_note"] == "instagram_public_original_url"
+
+
 def test_cobalt_fallback_is_limited_to_supported_provider_hosts():
     assert should_try_cobalt_fallback("https://www.youtube.com/watch?v=jNQXAC9IVRw")
     assert should_try_cobalt_fallback("https://www.instagram.com/reel/ABC123/")
@@ -684,6 +778,38 @@ def test_downloader_resolves_instagram_share_redirect_before_retry(tmp_path, mon
         "https://www.instagram.com/share/reel/BA123xyz/",
         "https://www.instagram.com/reel/ABC123/",
     ]
+
+
+def test_downloader_uses_instagram_public_media_fallback_before_cobalt(tmp_path, monkeypatch):
+    service = DownloaderService(Settings(cobalt_api_base_url="https://cobalt.example"))
+    output_file = tmp_path / "instagram-public.mp4"
+
+    def fake_download(url, output_dir, options):
+        raise RuntimeError("Requested content is not available, rate-limit reached or login required")
+
+    def fake_public_download(url, output_dir, settings, user_agent):
+        output_file.write_bytes(b"video")
+        return InstagramPublicDownloadResult(
+            file_path=output_file,
+            info={"id": "ABC123", "title": "Instagram", "webpage_url": url, "extractor": "instagram_public"},
+        )
+
+    class FailingCobaltService:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def download(self, url, output_dir):
+            raise AssertionError("Cobalt should not be called when Instagram public media fallback succeeds")
+
+    monkeypatch.setattr(service, "_download_with_options", fake_download)
+    monkeypatch.setattr("app.services.downloader_service.download_instagram_public_media", fake_public_download)
+    monkeypatch.setattr("app.services.downloader_service.CobaltService", FailingCobaltService)
+
+    result = service.download("https://www.instagram.com/reel/ABC123/", tmp_path)
+
+    assert result.success is True
+    assert result.file_path == output_file
+    assert result.metadata["extractor"] == "instagram_public"
 
 
 def test_downloader_retries_x_with_url_variant_fallback(tmp_path, monkeypatch):

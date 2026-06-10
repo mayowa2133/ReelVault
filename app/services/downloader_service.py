@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+import html
 import json
 import os
 from pathlib import Path
@@ -14,7 +15,7 @@ import httpx
 
 from app.config import Settings
 from app.models.schemas import DownloadResult
-from app.services.cobalt_service import CobaltService
+from app.services.cobalt_service import CobaltService, unique_output_path
 from app.services.youtube_mirror_service import YoutubeMirrorService, youtube_video_id
 from app.utils.errors import DownloadFailedError, ExternalServiceError, public_error_message
 from app.utils.logging import get_logger
@@ -43,6 +44,12 @@ class YoutubeNoAuthFallbackStrategy:
 class XNoAuthFallbackStrategy:
     name: str
     twitter_args: dict[str, list[str]]
+
+
+@dataclass(frozen=True)
+class InstagramPublicDownloadResult:
+    file_path: Path
+    info: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -262,13 +269,19 @@ class DownloaderService:
                     reason,
                 )
                 if fallback_error:
-                    info, file_path, fallback_error = self._download_with_cobalt_fallback(
+                    info, file_path, fallback_error = self._download_with_instagram_public_fallback(
                         url,
                         output_dir,
                         fallback_error,
                     )
                     if fallback_error:
-                        return self._download_failed_result(fallback_error)
+                        info, file_path, fallback_error = self._download_with_cobalt_fallback(
+                            url,
+                            output_dir,
+                            fallback_error,
+                        )
+                        if fallback_error:
+                            return self._download_failed_result(fallback_error)
             elif should_retry_x_with_api_fallbacks(url, reason):
                 info, file_path, fallback_error = self._download_with_x_fallbacks(
                     url,
@@ -496,6 +509,29 @@ class DownloaderService:
             f"{initial_reason}. Instagram no-auth URL variant fallback attempts also failed: "
             f"{summarize_attempt_errors(attempt_errors[1:])}"
         )
+
+    def _download_with_instagram_public_fallback(
+        self,
+        url: str,
+        output_dir: Path,
+        initial_reason: str,
+    ) -> tuple[dict[str, Any], Path | None, str | None]:
+        if provider_host(url) != "instagram.com":
+            return {}, None, initial_reason
+
+        try:
+            public_result = download_instagram_public_media(
+                url,
+                output_dir,
+                self.settings,
+                user_agent=self._yt_dlp_user_agent(),
+            )
+            logger.warning("instagram_download_succeeded_with_public_media_fallback", extra={"url": url})
+            return public_result.info, public_result.file_path, None
+        except Exception as public_exc:
+            public_reason = public_error_message(public_exc)
+            logger.warning("instagram_public_media_fallback_failed", extra={"url": url, "error": public_reason})
+            return {}, None, f"{initial_reason}. Instagram public media fallback failed: {public_reason}"
 
     def _download_with_x_fallbacks(
         self,
@@ -1197,6 +1233,203 @@ def fetch_tiktok_redirect_url(url: str, timeout_seconds: int, user_agent: str) -
     if provider_host(redirect_url) in {"tiktok.com", "m.tiktok.com"} and not is_tiktok_short_url(redirect_url):
         return redirect_url
     return None
+
+
+def download_instagram_public_media(
+    url: str,
+    output_dir: Path,
+    settings: Settings,
+    user_agent: str,
+) -> InstagramPublicDownloadResult:
+    candidate_urls = instagram_public_page_urls(
+        url,
+        timeout_seconds=settings.request_timeout_seconds,
+        user_agent=user_agent,
+    )
+    attempt_errors: list[tuple[str, str]] = []
+    headers = instagram_public_headers(user_agent)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with httpx.Client(timeout=settings.request_timeout_seconds, follow_redirects=True, headers=headers) as client:
+        for page_name, page_url in candidate_urls:
+            try:
+                response = client.get(page_url)
+                response.raise_for_status()
+                media_urls = extract_instagram_public_media_urls(response.text)
+                title = extract_html_meta_content(response.text, ("og:title", "twitter:title"))
+                if not media_urls:
+                    raise DownloadFailedError("Instagram public page did not expose a direct video URL", step="download")
+
+                media_url = media_urls[0]
+                file_path = unique_output_path(output_dir / instagram_public_filename(url, media_url))
+                download_direct_media(
+                    client,
+                    media_url,
+                    file_path,
+                    max_bytes=settings.max_video_size_mb * 1024 * 1024,
+                    headers={
+                        "User-Agent": user_agent,
+                        "Referer": page_url,
+                    },
+                )
+                return InstagramPublicDownloadResult(
+                    file_path=file_path,
+                    info={
+                        "id": instagram_public_id(url),
+                        "title": title or f"Instagram video {instagram_public_id(url)}",
+                        "webpage_url": url,
+                        "extractor": "instagram_public",
+                        "format_note": page_name,
+                    },
+                )
+            except Exception as exc:
+                attempt_errors.append((page_name, public_error_message(exc)))
+
+    raise DownloadFailedError(
+        f"Instagram public media fallback attempts failed: {summarize_attempt_errors(attempt_errors)}",
+        step="download",
+    )
+
+
+def instagram_public_page_urls(url: str, timeout_seconds: int, user_agent: str) -> list[tuple[str, str]]:
+    page_urls: list[tuple[str, str]] = [("instagram_public_original_url", url)]
+    if is_instagram_share_url(url):
+        try:
+            redirect_url = fetch_instagram_redirect_url(url, timeout_seconds=timeout_seconds, user_agent=user_agent)
+            if redirect_url:
+                page_urls.extend(
+                    [
+                        ("instagram_public_share_redirect_url", redirect_url),
+                        *[
+                            (f"instagram_public_{name}", fallback_url)
+                            for name, fallback_url in instagram_fallback_urls(redirect_url)
+                        ],
+                    ]
+                )
+        except Exception as exc:
+            logger.warning("instagram_public_share_redirect_failed", extra={"url": url, "error": public_error_message(exc)})
+
+    page_urls.extend((f"instagram_public_{name}", fallback_url) for name, fallback_url in instagram_fallback_urls(url))
+    return dedupe_named_urls(page_urls)
+
+
+def instagram_public_headers(user_agent: str) -> dict[str, str]:
+    return {
+        "User-Agent": user_agent,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Referer": "https://www.instagram.com/",
+    }
+
+
+def extract_instagram_public_media_urls(webpage: str) -> list[str]:
+    candidates: list[str] = []
+    for meta_name in ("og:video", "og:video:secure_url", "twitter:player:stream"):
+        if meta_content := extract_html_meta_content(webpage, (meta_name,)):
+            candidates.append(meta_content)
+
+    patterns = (
+        r'"video_url"\s*:\s*"([^"]+)"',
+        r'&quot;video_url&quot;\s*:\s*&quot;([^&]+)&quot;',
+        r'"video_versions"\s*:\s*\[[^\]]*?"url"\s*:\s*"([^"]+)"',
+        r'&quot;video_versions&quot;\s*:\s*\[[^\]]*?&quot;url&quot;\s*:\s*&quot;([^&]+)&quot;',
+    )
+    for pattern in patterns:
+        candidates.extend(match.group(1) for match in re.finditer(pattern, webpage))
+
+    direct_url_pattern = r'https?:\\?/\\?/[^"\'<>\s]+?\.mp4(?:\?[^"\'<>\s]*)?'
+    candidates.extend(match.group(0) for match in re.finditer(direct_url_pattern, webpage))
+
+    media_urls: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        decoded = decode_instagram_public_media_url(candidate)
+        if not decoded or decoded in seen:
+            continue
+        seen.add(decoded)
+        media_urls.append(decoded)
+    return media_urls
+
+
+def extract_html_meta_content(webpage: str, names: tuple[str, ...]) -> str | None:
+    joined_names = "|".join(re.escape(name) for name in names)
+    patterns = (
+        rf'<meta\b(?=[^>]*(?:property|name)=["\'](?:{joined_names})["\'])(?=[^>]*content=["\']([^"\']+)["\'])[^>]*>',
+        rf'<meta\b(?=[^>]*content=["\']([^"\']+)["\'])(?=[^>]*(?:property|name)=["\'](?:{joined_names})["\'])[^>]*>',
+    )
+    for pattern in patterns:
+        match = re.search(pattern, webpage, flags=re.IGNORECASE)
+        if match:
+            value = html.unescape(match.group(1)).strip()
+            if value:
+                return value
+    return None
+
+
+def decode_instagram_public_media_url(value: str) -> str | None:
+    text = html.unescape(value).strip().strip('"').strip("'")
+    for _ in range(2):
+        if "\\/" not in text and "\\u" not in text:
+            break
+        try:
+            text = json.loads(f'"{text}"')
+        except json.JSONDecodeError:
+            text = text.replace("\\/", "/").replace("\\u0026", "&")
+            break
+
+    text = html.unescape(text).strip()
+    if not text.startswith(("http://", "https://")):
+        return None
+    return text
+
+
+def download_direct_media(
+    client: httpx.Client,
+    media_url: str,
+    file_path: Path,
+    max_bytes: int,
+    headers: dict[str, str],
+) -> None:
+    total_bytes = 0
+    try:
+        with client.stream("GET", media_url, headers=headers) as response:
+            response.raise_for_status()
+            with file_path.open("wb") as output_file:
+                for chunk in response.iter_bytes():
+                    if not chunk:
+                        continue
+                    total_bytes += len(chunk)
+                    if total_bytes > max_bytes:
+                        raise DownloadFailedError("Direct media download exceeded MAX_VIDEO_SIZE_MB", step="download")
+                    output_file.write(chunk)
+    except Exception:
+        file_path.unlink(missing_ok=True)
+        raise
+
+    if not file_path.exists() or file_path.stat().st_size == 0:
+        file_path.unlink(missing_ok=True)
+        raise DownloadFailedError("Direct media response was empty", step="download")
+
+
+def instagram_public_filename(source_url: str, media_url: str) -> str:
+    extension = Path(urlsplit(media_url).path).suffix.lower()
+    if extension not in {".mp4", ".mov", ".m4v", ".webm"}:
+        extension = ".mp4"
+    return f"{instagram_public_id(source_url)}{extension}"
+
+
+def instagram_public_id(url: str) -> str:
+    parsed = urlsplit(url)
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) >= 2 and parts[0].lower() in {"reel", "reels", "p", "tv"}:
+        return safe_filename_id(parts[1])
+    if len(parts) >= 3 and parts[0].lower() == "share":
+        return safe_filename_id(parts[2])
+    return "instagram_media"
+
+
+def safe_filename_id(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_-]+", "_", value).strip("_")
+    return cleaned[:80] or "instagram_media"
 
 
 def x_fallback_urls(url: str) -> list[tuple[str, str]]:
