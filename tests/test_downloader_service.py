@@ -575,6 +575,13 @@ def test_tiktok_public_filename_uses_video_id_and_safe_extension():
     )
     assert (
         tiktok_public_filename(
+            "https://www.tiktok.com/share/video/7253412088251534594/",
+            "https://cdn.example/video.mp4?token=abc",
+        )
+        == "7253412088251534594.mp4"
+    )
+    assert (
+        tiktok_public_filename(
             "https://www.tiktok.com/embed/7253412088251534594",
             "https://cdn.example/video.mp4?token=abc",
         )
@@ -672,6 +679,7 @@ def test_instagram_share_url_detection():
     assert is_instagram_share_url("https://www.instagram.com/share/reel/BA123xyz/")
     assert is_instagram_share_url("https://www.instagram.com/share/p/BA123xyz/")
     assert is_instagram_share_url("https://www.instagram.com/share/tv/BA123xyz/")
+    assert is_instagram_share_url("https://www.instagram.com/share/BA123xyz/")
     assert not is_instagram_share_url("https://www.instagram.com/reel/ABC123/")
 
 

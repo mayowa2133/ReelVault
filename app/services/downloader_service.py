@@ -1233,7 +1233,9 @@ def is_instagram_share_url(url: str) -> bool:
     if host != "instagram.com":
         return False
     parts = [part for part in parsed.path.split("/") if part]
-    return len(parts) >= 3 and parts[0].lower() == "share" and parts[1].lower() in {"reel", "p", "tv"}
+    if len(parts) >= 3 and parts[0].lower() == "share" and parts[1].lower() in {"reel", "p", "tv"}:
+        return True
+    return len(parts) >= 2 and parts[0].lower() == "share"
 
 
 def fetch_instagram_redirect_url(url: str, timeout_seconds: int, user_agent: str) -> str | None:
@@ -1480,6 +1482,8 @@ def tiktok_public_id(url: str) -> str:
         return safe_filename_id(parts[0])
     if len(parts) >= 2 and parts[0].lower() in {"t", "v"}:
         return safe_filename_id(parts[1])
+    if len(parts) >= 3 and parts[0].lower() == "share" and parts[1].lower() == "video":
+        return safe_filename_id(parts[2])
     return "tiktok_media"
 
 

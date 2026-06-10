@@ -90,6 +90,17 @@ def normalize_instagram_url(raw_url: str) -> ReelReference | None:
             provider="instagram",
         )
 
+    if len(parts) >= 2 and parts[0].lower() == "share":
+        share_token = parts[1]
+        normalized = f"https://www.instagram.com/share/{quote(share_token)}/"
+        return ReelReference(
+            url=normalized,
+            raw_url=raw_url,
+            shortcode=share_token,
+            is_share_url=True,
+            provider="instagram",
+        )
+
     return None
 
 
@@ -123,7 +134,7 @@ def normalize_youtube_url(raw_url: str) -> ReelReference | None:
             return None
         normalized_path = "/watch"
         normalized_query = urlencode({"v": video_id})
-    elif len(parts) >= 2 and parts[0].lower() in {"shorts", "live", "embed"}:
+    elif len(parts) >= 2 and parts[0].lower() in {"shorts", "live", "embed", "clip"}:
         video_id = parts[1]
         normalized_path = f"/{parts[0].lower()}/{quote(video_id)}"
     else:
@@ -148,17 +159,20 @@ def normalize_tiktok_url(raw_url: str) -> ReelReference | None:
         return None
 
     shortcode = None
+    normalized_path = "/" + "/".join(quote(part, safe="@") for part in parts)
     if len(parts) >= 3 and parts[0].startswith("@") and parts[1].lower() == "video":
         shortcode = parts[2]
     elif host in {"vm.tiktok.com", "vt.tiktok.com"}:
         shortcode = parts[0]
     elif len(parts) >= 2 and parts[0].lower() in {"t", "v"}:
         shortcode = parts[1]
+    elif len(parts) >= 3 and parts[0].lower() == "share" and parts[1].lower() == "video":
+        shortcode = parts[2]
+        normalized_path = f"/@_/video/{quote(shortcode)}"
 
     if not shortcode:
         return None
 
-    normalized_path = "/" + "/".join(quote(part, safe="@") for part in parts)
     return ReelReference(
         url=urlunsplit(("https", parsed.netloc.lower(), normalized_path, "", "")),
         raw_url=raw_url,
@@ -174,7 +188,7 @@ def normalize_x_url(raw_url: str) -> ReelReference | None:
         return None
 
     parts = [unquote(part) for part in parsed.path.split("/") if part]
-    status_index = next((index for index, part in enumerate(parts) if part.lower() == "status"), None)
+    status_index = next((index for index, part in enumerate(parts) if part.lower() in {"status", "statuses"}), None)
     if status_index is None or len(parts) <= status_index + 1:
         return None
 
