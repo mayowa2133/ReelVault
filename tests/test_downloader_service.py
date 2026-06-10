@@ -204,6 +204,7 @@ def test_downloader_runtime_info_includes_package_spec(monkeypatch):
     assert info["youtube_pot_bgutil_http_provider_status"] is None
     assert info["youtube_pot_bgutil_http_provider_version"] is None
     assert info["youtube_pot_bgutil_http_provider_error"] is None
+    assert info["instagram_public_media_fallback_enabled"] is True
     assert "youtube_po_token_provider_plugins_available" in info
     assert "youtube_po_token_provider_plugins" in info
 

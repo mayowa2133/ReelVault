@@ -833,6 +833,7 @@ def downloader_runtime_info(settings: Settings) -> dict[str, Any]:
         "youtube_piped_configured": bool(settings.youtube_piped_api_base_urls),
         "youtube_invidious_configured": bool(settings.youtube_invidious_base_urls),
         "youtube_no_auth_fallback_strategy_count": len(YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES),
+        "instagram_public_media_fallback_enabled": True,
         "tiktok_no_auth_fallback_strategy_count": len(TIKTOK_NO_AUTH_FALLBACK_STRATEGIES),
         "x_no_auth_fallback_strategy_count": len(X_NO_AUTH_FALLBACK_STRATEGIES),
         "custom_user_agent_configured": bool(settings.social_download_user_agent),
