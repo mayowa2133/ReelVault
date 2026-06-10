@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     social_download_user_agent: str | None = None
     social_download_accept_language: str | None = None
     social_extractor_args_json: str | None = None
-    yt_dlp_impersonate_client: str | None = None
+    yt_dlp_impersonate_client: str | None = "any"
     yt_dlp_retries: int = 1
     yt_dlp_extractor_retries: int | None = None
     yt_dlp_fragment_retries: int | None = None
