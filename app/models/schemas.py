@@ -67,6 +67,8 @@ class DownloadResult(BaseModel):
     creator_username: str | None = None
     title: str | None = None
     error_message: str | None = None
+    failure_category: str | None = None
+    next_steps: list[str] = Field(default_factory=list)
     metadata: dict[str, str | int | float | None] = Field(default_factory=dict)
 
 

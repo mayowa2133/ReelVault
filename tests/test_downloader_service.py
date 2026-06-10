@@ -27,6 +27,7 @@ from app.services.downloader_service import (
     should_retry_x_with_api_fallbacks,
     should_retry_youtube_without_webpage,
     tiktok_public_filename,
+    download_failure_guidance,
     downloader_runtime_info,
     summarize_attempt_errors,
     x_fallback_urls,
@@ -252,6 +253,34 @@ def test_downloader_runtime_info_reports_bgutil_http_provider_error(monkeypatch)
     assert info["youtube_pot_bgutil_http_provider_status"] is None
     assert info["youtube_pot_bgutil_http_provider_version"] is None
     assert "provider timeout" in info["youtube_pot_bgutil_http_provider_error"]
+
+
+def test_download_failure_guidance_for_youtube_lists_remaining_external_options():
+    guidance = download_failure_guidance("https://www.youtube.com/watch?v=jNQXAC9IVRw", Settings())
+
+    assert guidance["category"] == "youtube_anonymous_exhausted"
+    assert any("Piped or Invidious" in step for step in guidance["next_steps"])
+    assert any("COBALT_API_BASE_URL" in step for step in guidance["next_steps"])
+    assert any("SOCIAL_DOWNLOAD_PROXY_URL" in step for step in guidance["next_steps"])
+    assert any("ENABLE_AUTH_COOKIES=true" in step for step in guidance["next_steps"])
+
+
+def test_download_failure_guidance_omits_configured_youtube_options():
+    guidance = download_failure_guidance(
+        "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+        Settings(
+            youtube_piped_api_base_urls="https://piped.example",
+            cobalt_api_base_url="https://cobalt.example",
+            social_download_proxy_url="http://proxy.example:8080",
+            enable_auth_cookies=True,
+        ),
+    )
+
+    assert guidance["category"] == "youtube_anonymous_exhausted"
+    assert not any("Piped or Invidious" in step for step in guidance["next_steps"])
+    assert not any("COBALT_API_BASE_URL" in step for step in guidance["next_steps"])
+    assert not any("SOCIAL_DOWNLOAD_PROXY_URL" in step for step in guidance["next_steps"])
+    assert not any("ENABLE_AUTH_COOKIES=true" in step for step in guidance["next_steps"])
 
 
 def test_downloader_merges_custom_extractor_args_json(tmp_path):
@@ -1048,6 +1077,9 @@ def test_downloader_reports_all_youtube_fallback_failures(tmp_path, monkeypatch)
     assert "YouTube no-auth fallback attempts also failed" in result.error_message
     assert "mweb_no_webpage_configs" in result.error_message
     assert "all_clients_no_webpage" in result.error_message
+    assert result.failure_category == "youtube_anonymous_exhausted"
+    assert any("COBALT_API_BASE_URL" in step for step in result.next_steps)
+    assert "Next steps:" in result.error_message
 
 
 def test_downloader_uses_configured_cobalt_after_provider_fallbacks_fail(tmp_path, monkeypatch):

@@ -116,6 +116,8 @@ def test_download_diagnostic_returns_failed_result(tmp_path, monkeypatch):
                 success=False,
                 status="download_failed",
                 error_message="blocked",
+                failure_category="instagram_anonymous_exhausted",
+                next_steps=["Configure COBALT_API_BASE_URL."],
             )
 
     monkeypatch.setattr("app.routes.diagnostics.DownloaderService", FakeDownloader)
@@ -133,3 +135,5 @@ def test_download_diagnostic_returns_failed_result(tmp_path, monkeypatch):
     assert body["provider"] == "instagram"
     assert body["status"] == "download_failed"
     assert body["error"] == "blocked"
+    assert body["failure_category"] == "instagram_anonymous_exhausted"
+    assert body["next_steps"] == ["Configure COBALT_API_BASE_URL."]

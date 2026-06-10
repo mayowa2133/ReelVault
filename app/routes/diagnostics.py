@@ -77,6 +77,8 @@ def download_diagnostic(
             "file_size_bytes": file_size_bytes,
             "metadata": result.metadata,
             "error": result.error_message,
+            "failure_category": result.failure_category,
+            "next_steps": result.next_steps,
             "downloader": downloader_runtime_info(settings),
         }
         append_debug_log(response, debug_log, payload.debug_log_max_chars)

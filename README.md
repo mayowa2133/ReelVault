@@ -524,7 +524,7 @@ curl -X POST "$BASE_URL/diagnostics/download" \
   -d '{"url":"https://www.instagram.com/reel/DWuZeLziciR/"}'
 ```
 
-This endpoint is protected by `TASK_REQUEST_SECRET`, downloads into temporary storage, deletes the file before responding, and does not write to Sheets, Drive, OpenAI, or Telegram. Use it to verify whether the currently deployed Cloud Run revision can anonymously download a specific YouTube, Instagram, or TikTok URL.
+This endpoint is protected by `TASK_REQUEST_SECRET`, downloads into temporary storage, deletes the file before responding, and does not write to Sheets, Drive, OpenAI, or Telegram. Use it to verify whether the currently deployed Cloud Run revision can anonymously download a specific YouTube, Instagram, or TikTok URL. Failed responses include `failure_category` and `next_steps` fields so you can distinguish built-in anonymous fallback exhaustion from missing optional infrastructure such as Piped/Invidious, Cobalt, or an allowed proxy.
 
 ## Deployment
 

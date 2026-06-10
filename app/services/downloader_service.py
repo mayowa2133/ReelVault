@@ -251,7 +251,7 @@ class DownloaderService:
                             fallback_error,
                         )
                         if fallback_error:
-                            return self._download_failed_result(fallback_error)
+                            return self._download_failed_result(url, fallback_error)
             elif should_retry_tiktok_with_mobile_api(url, reason):
                 info, file_path, fallback_error = self._download_with_tiktok_fallbacks(
                     url,
@@ -272,7 +272,7 @@ class DownloaderService:
                             fallback_error,
                         )
                         if fallback_error:
-                            return self._download_failed_result(fallback_error)
+                            return self._download_failed_result(url, fallback_error)
             elif should_retry_instagram_with_url_variants(url, reason):
                 info, file_path, fallback_error = self._download_with_instagram_fallbacks(
                     url,
@@ -293,7 +293,7 @@ class DownloaderService:
                             fallback_error,
                         )
                         if fallback_error:
-                            return self._download_failed_result(fallback_error)
+                            return self._download_failed_result(url, fallback_error)
             elif should_retry_x_with_api_fallbacks(url, reason):
                 info, file_path, fallback_error = self._download_with_x_fallbacks(
                     url,
@@ -308,12 +308,12 @@ class DownloaderService:
                         fallback_error,
                     )
                     if fallback_error:
-                        return self._download_failed_result(fallback_error)
+                        return self._download_failed_result(url, fallback_error)
             else:
                 info, file_path, fallback_error = self._download_with_cobalt_fallback(url, output_dir, reason)
                 if fallback_error:
                     logger.warning("reel_download_failed", extra={"error": fallback_error})
-                    return self._download_failed_result(fallback_error)
+                    return self._download_failed_result(url, fallback_error)
 
         if not file_path or not file_path.exists():
             raise DownloadFailedError("yt-dlp reported success but no video file was found", step="download")
@@ -342,14 +342,19 @@ class DownloaderService:
             info = ydl.extract_info(url, download=True)
             return info, resolve_downloaded_path(info, output_dir, ydl)
 
-    def _download_failed_result(self, reason: str) -> DownloadResult:
+    def _download_failed_result(self, url: str, reason: str) -> DownloadResult:
+        failure_guidance = download_failure_guidance(url, self.settings)
+        guidance_text = format_download_failure_guidance(failure_guidance)
+        details = f"{reason}{guidance_text}"
         return DownloadResult(
             success=False,
             status="download_failed",
             error_message=(
                 "Download failed. The platform may require login, block automated requests, "
-                f"rate limit this link, or expose media that yt-dlp cannot access anonymously. Details: {reason}"
+                f"rate limit this link, or expose media that yt-dlp cannot access anonymously. Details: {details}"
             ),
+            failure_category=failure_guidance.get("category"),
+            next_steps=list(failure_guidance.get("next_steps") or []),
         )
 
     def _download_with_youtube_fallbacks(
@@ -1793,6 +1798,87 @@ def should_retry_instagram_with_url_variants(url: str, error_message: str) -> bo
 
 def should_retry_x_with_api_fallbacks(url: str, _error_message: str) -> bool:
     return provider_host(url) in {"x.com", "twitter.com", "mobile.twitter.com"}
+
+
+def download_failure_guidance(url: str, settings: Settings) -> dict[str, str | list[str]]:
+    host = provider_host(url)
+
+    if host in {"youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}:
+        next_steps = [
+            "Built-in YouTube no-auth yt-dlp, PO-token provider, client, Visitor Data, and public mirror/Cobalt hooks have been exhausted for this request.",
+        ]
+        if not (settings.youtube_piped_api_base_urls or settings.youtube_invidious_base_urls):
+            next_steps.append("Configure your own Piped or Invidious API instance with YOUTUBE_PIPED_API_BASE_URLS or YOUTUBE_INVIDIOUS_BASE_URLS for another no-cookie YouTube path.")
+        if not settings.cobalt_api_base_url:
+            next_steps.append("Configure a trusted Cobalt API instance with COBALT_API_BASE_URL as a server-side no-auth fallback.")
+        if not settings.social_download_proxy_url:
+            next_steps.append("Use SOCIAL_DOWNLOAD_PROXY_URL with infrastructure you operate or are allowed to use if Cloud Run egress is being blocked.")
+        if not settings.enable_auth_cookies:
+            next_steps.append("If the video is login-only or YouTube hard-blocks anonymous server traffic, the remaining reliable fallback is intentionally enabling cookies with ENABLE_AUTH_COOKIES=true.")
+        return {
+            "category": "youtube_anonymous_exhausted",
+            "next_steps": next_steps,
+        }
+
+    if host in {"instagram.com"}:
+        next_steps = [
+            "Built-in Instagram no-auth yt-dlp URL variants, share redirects, embed URLs, and public direct-media HTML parsing have been exhausted for this request.",
+        ]
+        if not settings.cobalt_api_base_url:
+            next_steps.append("Configure a trusted Cobalt API instance with COBALT_API_BASE_URL for another server-side no-auth attempt.")
+        if not settings.social_download_proxy_url:
+            next_steps.append("Use SOCIAL_DOWNLOAD_PROXY_URL with allowed infrastructure if Instagram is blocking Cloud Run egress.")
+        if not settings.enable_auth_cookies:
+            next_steps.append("If the Reel is private, follower-only, expired, or login-gated, anonymous download cannot be made reliable; cookies or a direct file upload are the remaining reliable options.")
+        return {
+            "category": "instagram_anonymous_exhausted",
+            "next_steps": next_steps,
+        }
+
+    if host in {"tiktok.com", "m.tiktok.com", "vm.tiktok.com", "vt.tiktok.com"}:
+        next_steps = [
+            "Built-in TikTok no-auth yt-dlp, short-link resolution, mobile API profiles, and public direct-media HTML parsing have been exhausted for this request.",
+        ]
+        if not settings.cobalt_api_base_url:
+            next_steps.append("Configure a trusted Cobalt API instance with COBALT_API_BASE_URL for another server-side no-auth attempt.")
+        if not settings.social_download_proxy_url:
+            next_steps.append("Use SOCIAL_DOWNLOAD_PROXY_URL with allowed infrastructure if TikTok is blocking Cloud Run egress.")
+        if not settings.enable_auth_cookies:
+            next_steps.append("If TikTok returns a login/challenge page or region block, anonymous download may not be reliable; cookies, alternate egress, or direct file upload are the remaining reliable options.")
+        return {
+            "category": "tiktok_anonymous_exhausted",
+            "next_steps": next_steps,
+        }
+
+    if host in {"x.com", "twitter.com", "mobile.twitter.com"}:
+        next_steps = [
+            "Built-in X/Twitter no-auth yt-dlp URL variants and legacy API fallback have been exhausted for this request.",
+        ]
+        if not settings.cobalt_api_base_url:
+            next_steps.append("Configure a trusted Cobalt API instance with COBALT_API_BASE_URL for another server-side no-auth attempt.")
+        if not settings.social_download_proxy_url:
+            next_steps.append("Use SOCIAL_DOWNLOAD_PROXY_URL with allowed infrastructure if X/Twitter is blocking Cloud Run egress.")
+        if not settings.enable_auth_cookies:
+            next_steps.append("If the post or media is login-gated, cookies or direct file upload are the remaining reliable options.")
+        return {
+            "category": "x_anonymous_exhausted",
+            "next_steps": next_steps,
+        }
+
+    return {
+        "category": "provider_anonymous_exhausted",
+        "next_steps": [
+            "The configured anonymous downloader paths were exhausted for this provider.",
+            "Use a supported public URL, configure an allowed proxy/Cobalt fallback, or provide the media file directly.",
+        ],
+    }
+
+
+def format_download_failure_guidance(guidance: dict[str, str | list[str]]) -> str:
+    next_steps = [str(step) for step in guidance.get("next_steps") or [] if str(step).strip()]
+    if not next_steps:
+        return ""
+    return " Next steps: " + " ".join(next_steps)
 
 
 def should_try_cobalt_fallback(url: str) -> bool:
