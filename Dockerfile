@@ -41,7 +41,7 @@ ENV REELVAULT_YT_DLP_PACKAGE_SPEC="${YT_DLP_PACKAGE_SPEC}" \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg ca-certificates curl \
+    && apt-get install -y --no-install-recommends ffmpeg ca-certificates curl unzip \
     && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh -s v${DENO_VERSION} \
     && rm -rf /var/lib/apt/lists/*
 
