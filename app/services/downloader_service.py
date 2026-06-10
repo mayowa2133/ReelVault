@@ -53,6 +53,12 @@ class InstagramPublicDownloadResult:
 
 
 @dataclass(frozen=True)
+class TikTokPublicDownloadResult:
+    file_path: Path
+    info: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class TikTokNoAuthFallbackStrategy:
     name: str
     app_name: str
@@ -254,13 +260,19 @@ class DownloaderService:
                     reason,
                 )
                 if fallback_error:
-                    info, file_path, fallback_error = self._download_with_cobalt_fallback(
+                    info, file_path, fallback_error = self._download_with_tiktok_public_fallback(
                         url,
                         output_dir,
                         fallback_error,
                     )
                     if fallback_error:
-                        return self._download_failed_result(fallback_error)
+                        info, file_path, fallback_error = self._download_with_cobalt_fallback(
+                            url,
+                            output_dir,
+                            fallback_error,
+                        )
+                        if fallback_error:
+                            return self._download_failed_result(fallback_error)
             elif should_retry_instagram_with_url_variants(url, reason):
                 info, file_path, fallback_error = self._download_with_instagram_fallbacks(
                     url,
@@ -457,6 +469,29 @@ class DownloaderService:
             f"{initial_reason}. TikTok no-auth mobile API fallback attempts also failed: "
             f"{summarize_attempt_errors(attempt_errors[1:])}"
         )
+
+    def _download_with_tiktok_public_fallback(
+        self,
+        url: str,
+        output_dir: Path,
+        initial_reason: str,
+    ) -> tuple[dict[str, Any], Path | None, str | None]:
+        if provider_host(url) not in {"tiktok.com", "m.tiktok.com", "vm.tiktok.com", "vt.tiktok.com"}:
+            return {}, None, initial_reason
+
+        try:
+            public_result = download_tiktok_public_media(
+                url,
+                output_dir,
+                self.settings,
+                user_agent=self._yt_dlp_user_agent(),
+            )
+            logger.warning("tiktok_download_succeeded_with_public_media_fallback", extra={"url": url})
+            return public_result.info, public_result.file_path, None
+        except Exception as public_exc:
+            public_reason = public_error_message(public_exc)
+            logger.warning("tiktok_public_media_fallback_failed", extra={"url": url, "error": public_reason})
+            return {}, None, f"{initial_reason}. TikTok public media fallback failed: {public_reason}"
 
     def _download_with_instagram_fallbacks(
         self,
@@ -835,6 +870,7 @@ def downloader_runtime_info(settings: Settings) -> dict[str, Any]:
         "youtube_no_auth_fallback_strategy_count": len(YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES),
         "instagram_public_media_fallback_enabled": True,
         "tiktok_no_auth_fallback_strategy_count": len(TIKTOK_NO_AUTH_FALLBACK_STRATEGIES),
+        "tiktok_public_media_fallback_enabled": True,
         "x_no_auth_fallback_strategy_count": len(X_NO_AUTH_FALLBACK_STRATEGIES),
         "custom_user_agent_configured": bool(settings.social_download_user_agent),
         "custom_accept_language_configured": bool(settings.social_download_accept_language),
@@ -1234,6 +1270,212 @@ def fetch_tiktok_redirect_url(url: str, timeout_seconds: int, user_agent: str) -
     if provider_host(redirect_url) in {"tiktok.com", "m.tiktok.com"} and not is_tiktok_short_url(redirect_url):
         return redirect_url
     return None
+
+
+def download_tiktok_public_media(
+    url: str,
+    output_dir: Path,
+    settings: Settings,
+    user_agent: str,
+) -> TikTokPublicDownloadResult:
+    candidate_urls = tiktok_public_page_urls(
+        url,
+        timeout_seconds=settings.request_timeout_seconds,
+        user_agent=user_agent,
+    )
+    attempt_errors: list[tuple[str, str]] = []
+    headers = tiktok_public_headers(user_agent)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with httpx.Client(timeout=settings.request_timeout_seconds, follow_redirects=True, headers=headers) as client:
+        for page_name, page_url in candidate_urls:
+            try:
+                response = client.get(page_url)
+                response.raise_for_status()
+                media_urls = extract_tiktok_public_media_urls(response.text)
+                title = extract_html_meta_content(response.text, ("og:title", "twitter:title"))
+                if not media_urls:
+                    raise DownloadFailedError("TikTok public page did not expose a direct video URL", step="download")
+
+                media_url = media_urls[0]
+                public_id = tiktok_public_id(page_url)
+                file_path = unique_output_path(output_dir / tiktok_public_filename(page_url, media_url))
+                download_direct_media(
+                    client,
+                    media_url,
+                    file_path,
+                    max_bytes=settings.max_video_size_mb * 1024 * 1024,
+                    headers={
+                        "User-Agent": user_agent,
+                        "Referer": page_url,
+                    },
+                )
+                return TikTokPublicDownloadResult(
+                    file_path=file_path,
+                    info={
+                        "id": public_id,
+                        "title": title or f"TikTok video {public_id}",
+                        "webpage_url": url,
+                        "extractor": "tiktok_public",
+                        "format_note": page_name,
+                    },
+                )
+            except Exception as exc:
+                attempt_errors.append((page_name, public_error_message(exc)))
+
+    raise DownloadFailedError(
+        f"TikTok public media fallback attempts failed: {summarize_attempt_errors(attempt_errors)}",
+        step="download",
+    )
+
+
+def tiktok_public_page_urls(url: str, timeout_seconds: int, user_agent: str) -> list[tuple[str, str]]:
+    page_urls: list[tuple[str, str]] = [("tiktok_public_original_url", url)]
+    resolved_url: str | None = None
+
+    if is_tiktok_short_url(url):
+        try:
+            resolved_url = fetch_tiktok_redirect_url(url, timeout_seconds=timeout_seconds, user_agent=user_agent)
+            if resolved_url:
+                page_urls.insert(0, ("tiktok_public_short_redirect_url", resolved_url))
+        except Exception as exc:
+            logger.warning("tiktok_public_short_redirect_failed", extra={"url": url, "error": public_error_message(exc)})
+
+    video_id = tiktok_public_id(resolved_url or url)
+    if video_id != "tiktok_media":
+        page_urls.append(("tiktok_public_embed_url", f"https://www.tiktok.com/embed/{quote(video_id, safe='')}"))
+
+    return dedupe_named_urls(page_urls)
+
+
+def tiktok_public_headers(user_agent: str) -> dict[str, str]:
+    return {
+        "User-Agent": user_agent,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Referer": "https://www.tiktok.com/",
+    }
+
+
+def extract_tiktok_public_media_urls(webpage: str) -> list[str]:
+    candidates: list[str] = []
+    for data in extract_tiktok_public_json_blocks(webpage):
+        collect_tiktok_video_urls(data, candidates)
+
+    direct_url_pattern = r'https?:\\?/\\?/[^"\'<>\s]+?(?:\.mp4|/video/tos/|mime_type=video_mp4)[^"\'<>\s]*'
+    candidates.extend(match.group(0) for match in re.finditer(direct_url_pattern, webpage))
+
+    media_urls: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        decoded = decode_tiktok_public_media_url(candidate)
+        if not decoded or decoded in seen or not looks_like_tiktok_video_url(decoded):
+            continue
+        seen.add(decoded)
+        media_urls.append(decoded)
+    return media_urls
+
+
+def extract_tiktok_public_json_blocks(webpage: str) -> list[Any]:
+    blocks: list[Any] = []
+    pattern = r'<script[^>]+\bid=["\'](?:SIGI_STATE|sigi-persisted-data|__UNIVERSAL_DATA_FOR_REHYDRATION__)["\'][^>]*>(.*?)</script>'
+    for match in re.finditer(pattern, webpage, flags=re.IGNORECASE | re.DOTALL):
+        text = html.unescape(match.group(1)).strip()
+        if not text:
+            continue
+        try:
+            blocks.append(json.loads(text))
+        except json.JSONDecodeError:
+            continue
+    return blocks
+
+
+def collect_tiktok_video_urls(value: Any, candidates: list[str]) -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            normalized_key = re.sub(r"[^a-z0-9]+", "", str(key).lower())
+            if normalized_key in {
+                "playaddr",
+                "downloadaddr",
+                "playaddrh264",
+                "playaddrbytevc1",
+                "playaddrbytevc2",
+            }:
+                collect_tiktok_url_values(item, candidates)
+            else:
+                collect_tiktok_video_urls(item, candidates)
+    elif isinstance(value, list):
+        for item in value:
+            collect_tiktok_video_urls(item, candidates)
+
+
+def collect_tiktok_url_values(value: Any, candidates: list[str]) -> None:
+    if isinstance(value, str):
+        candidates.append(value)
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            normalized_key = re.sub(r"[^a-z0-9]+", "", str(key).lower())
+            if normalized_key in {"src", "url", "urllist", "urls"}:
+                collect_tiktok_url_values(item, candidates)
+            elif isinstance(item, (dict, list)):
+                collect_tiktok_url_values(item, candidates)
+    elif isinstance(value, list):
+        for item in value:
+            collect_tiktok_url_values(item, candidates)
+
+
+def decode_tiktok_public_media_url(value: str) -> str | None:
+    text = html.unescape(value).strip().strip('"').strip("'")
+    for _ in range(2):
+        if "\\/" not in text and "\\u" not in text:
+            break
+        try:
+            text = json.loads(f'"{text}"')
+        except json.JSONDecodeError:
+            text = text.replace("\\/", "/").replace("\\u0026", "&")
+            break
+
+    text = html.unescape(text).strip()
+    if not text.startswith(("http://", "https://")):
+        return None
+    return text
+
+
+def looks_like_tiktok_video_url(value: str) -> bool:
+    lowered = value.lower()
+    return any(
+        needle in lowered
+        for needle in (
+            ".mp4",
+            "/video/tos/",
+            "mime_type=video",
+            "tiktokcdn",
+            "tiktokv",
+            "byteoversea",
+            "ibytedtos",
+        )
+    )
+
+
+def tiktok_public_filename(source_url: str, media_url: str) -> str:
+    extension = Path(urlsplit(media_url).path).suffix.lower()
+    if extension not in {".mp4", ".mov", ".m4v", ".webm"}:
+        extension = ".mp4"
+    return f"{tiktok_public_id(source_url)}{extension}"
+
+
+def tiktok_public_id(url: str) -> str:
+    parsed = urlsplit(url)
+    host = parsed.netloc.lower().removeprefix("www.")
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) >= 3 and parts[0].startswith("@") and parts[1].lower() == "video":
+        return safe_filename_id(parts[2])
+    if len(parts) >= 2 and parts[0].lower() == "embed":
+        return safe_filename_id(parts[1])
+    if host in {"vm.tiktok.com", "vt.tiktok.com"} and parts:
+        return safe_filename_id(parts[0])
+    if len(parts) >= 2 and parts[0].lower() in {"t", "v"}:
+        return safe_filename_id(parts[1])
+    return "tiktok_media"
 
 
 def download_instagram_public_media(

@@ -3,11 +3,14 @@ from app.services.downloader_service import (
     DownloaderService,
     InstagramPublicDownloadResult,
     TIKTOK_NO_AUTH_FALLBACK_STRATEGIES,
+    TikTokPublicDownloadResult,
     YOUTUBE_FALLBACK_FORMAT,
     YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES,
     X_NO_AUTH_FALLBACK_STRATEGIES,
     download_instagram_public_media,
+    download_tiktok_public_media,
     extract_instagram_public_media_urls,
+    extract_tiktok_public_media_urls,
     fetch_anonymous_youtube_visitor_data,
     fetch_instagram_redirect_url,
     fetch_tiktok_redirect_url,
@@ -23,6 +26,7 @@ from app.services.downloader_service import (
     should_try_cobalt_fallback,
     should_retry_x_with_api_fallbacks,
     should_retry_youtube_without_webpage,
+    tiktok_public_filename,
     downloader_runtime_info,
     summarize_attempt_errors,
     x_fallback_urls,
@@ -205,6 +209,7 @@ def test_downloader_runtime_info_includes_package_spec(monkeypatch):
     assert info["youtube_pot_bgutil_http_provider_version"] is None
     assert info["youtube_pot_bgutil_http_provider_error"] is None
     assert info["instagram_public_media_fallback_enabled"] is True
+    assert info["tiktok_public_media_fallback_enabled"] is True
     assert "youtube_po_token_provider_plugins_available" in info
     assert "youtube_po_token_provider_plugins" in info
 
@@ -497,6 +502,118 @@ def test_fetch_tiktok_redirect_url_returns_canonical_video(monkeypatch):
     )
 
 
+def test_extract_tiktok_public_media_urls_parses_universal_data():
+    webpage = """
+    <script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">
+    {
+      "__DEFAULT_SCOPE__": {
+        "webapp.video-detail": {
+          "itemInfo": {
+            "itemStruct": {
+              "video": {
+                "bitrateInfo": [
+                  {
+                    "PlayAddr": {
+                      "UrlList": [
+                        "https:\\/\\/v16-webapp-prime.tiktok.com\\/video\\/tos\\/useast2a\\/abc"
+                      ]
+                    }
+                  }
+                ],
+                "playAddr": "https:\\/\\/v16-webapp-prime.tiktok.com\\/video\\/tos\\/useast2a\\/direct"
+              }
+            }
+          }
+        }
+      }
+    }
+    </script>
+    """
+
+    assert extract_tiktok_public_media_urls(webpage) == [
+        "https://v16-webapp-prime.tiktok.com/video/tos/useast2a/abc",
+        "https://v16-webapp-prime.tiktok.com/video/tos/useast2a/direct",
+    ]
+
+
+def test_tiktok_public_filename_uses_video_id_and_safe_extension():
+    assert (
+        tiktok_public_filename(
+            "https://www.tiktok.com/@creator/video/7253412088251534594",
+            "https://v16-webapp-prime.tiktok.com/video/tos/useast2a/abc",
+        )
+        == "7253412088251534594.mp4"
+    )
+    assert (
+        tiktok_public_filename(
+            "https://www.tiktok.com/embed/7253412088251534594",
+            "https://cdn.example/video.mp4?token=abc",
+        )
+        == "7253412088251534594.mp4"
+    )
+
+
+def test_download_tiktok_public_media_downloads_play_addr(tmp_path, monkeypatch):
+    class FakeResponse:
+        def __init__(self, text="", chunks=None):
+            self.text = text
+            self._chunks = chunks or []
+
+        def raise_for_status(self):
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def iter_bytes(self):
+            return iter(self._chunks)
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def get(self, url):
+            assert url == "https://www.tiktok.com/@creator/video/7253412088251534594"
+            return FakeResponse(
+                """
+                <meta property="og:title" content="A public TikTok">
+                <script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">
+                {"__DEFAULT_SCOPE__":{"webapp.video-detail":{"itemInfo":{"itemStruct":{"video":{"playAddr":"https:\\/\\/v16-webapp-prime.tiktok.com\\/video\\/tos\\/useast2a\\/abc"}}}}}}
+                </script>
+                """
+            )
+
+        def stream(self, method, url, headers):
+            assert method == "GET"
+            assert url == "https://v16-webapp-prime.tiktok.com/video/tos/useast2a/abc"
+            assert headers["Referer"] == "https://www.tiktok.com/@creator/video/7253412088251534594"
+            return FakeResponse(chunks=[b"vid", b"eo"])
+
+    monkeypatch.setattr("app.services.downloader_service.httpx.Client", FakeClient)
+
+    result = download_tiktok_public_media(
+        "https://www.tiktok.com/@creator/video/7253412088251534594",
+        tmp_path,
+        Settings(max_video_size_mb=1),
+        user_agent="UA",
+    )
+
+    assert result.file_path.read_bytes() == b"video"
+    assert result.file_path.name == "7253412088251534594.mp4"
+    assert result.info["extractor"] == "tiktok_public"
+    assert result.info["title"] == "A public TikTok"
+    assert result.info["format_note"] == "tiktok_public_original_url"
+
+
 def test_instagram_url_variant_error_is_retryable():
     assert should_retry_instagram_with_url_variants(
         "https://www.instagram.com/reel/ABC123/",
@@ -727,6 +844,38 @@ def test_downloader_resolves_tiktok_short_url_before_mobile_api_fallback(tmp_pat
     assert calls[1][0] == canonical_url
     assert calls[2][0] == canonical_url
     assert calls[2][1]["extractor_args"]["tiktok"]["app_info"][0].endswith("/musical_ly/35.1.3/2023501030/0")
+
+
+def test_downloader_uses_tiktok_public_media_fallback_before_cobalt(tmp_path, monkeypatch):
+    service = DownloaderService(Settings(cobalt_api_base_url="https://cobalt.example"))
+    output_file = tmp_path / "tiktok-public.mp4"
+
+    def fake_download(url, output_dir, options):
+        raise RuntimeError("Video not available, status code 0")
+
+    def fake_public_download(url, output_dir, settings, user_agent):
+        output_file.write_bytes(b"video")
+        return TikTokPublicDownloadResult(
+            file_path=output_file,
+            info={"id": "7253412088251534594", "title": "TikTok", "webpage_url": url, "extractor": "tiktok_public"},
+        )
+
+    class FailingCobaltService:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def download(self, url, output_dir):
+            raise AssertionError("Cobalt should not be called when TikTok public media fallback succeeds")
+
+    monkeypatch.setattr(service, "_download_with_options", fake_download)
+    monkeypatch.setattr("app.services.downloader_service.download_tiktok_public_media", fake_public_download)
+    monkeypatch.setattr("app.services.downloader_service.CobaltService", FailingCobaltService)
+
+    result = service.download("https://www.tiktok.com/@creator/video/7253412088251534594", tmp_path)
+
+    assert result.success is True
+    assert result.file_path == output_file
+    assert result.metadata["extractor"] == "tiktok_public"
 
 
 def test_downloader_retries_instagram_with_url_variants(tmp_path, monkeypatch):
