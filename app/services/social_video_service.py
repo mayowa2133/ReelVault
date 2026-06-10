@@ -175,13 +175,15 @@ def normalize_tiktok_url(raw_url: str) -> ReelReference | None:
     shortcode = None
     normalized_path = "/" + "/".join(quote(part, safe="@") for part in parts)
     if len(parts) >= 3 and parts[0].startswith("@") and parts[1].lower() == "video":
-        shortcode = parts[2]
+        shortcode = clean_tiktok_video_id(parts[2])
+        normalized_path = f"/{quote(parts[0], safe='@')}/video/{quote(shortcode)}"
     elif host in {"vm.tiktok.com", "vt.tiktok.com"}:
         shortcode = parts[0]
     elif len(parts) >= 2 and parts[0].lower() in {"t", "v"}:
-        shortcode = parts[1]
+        shortcode = clean_tiktok_video_id(parts[1])
+        normalized_path = f"/{parts[0].lower()}/{quote(shortcode)}"
     elif len(parts) >= 3 and parts[0].lower() == "share" and parts[1].lower() == "video":
-        shortcode = parts[2]
+        shortcode = clean_tiktok_video_id(parts[2])
         normalized_path = f"/@_/video/{quote(shortcode)}"
 
     if not shortcode:
@@ -193,6 +195,10 @@ def normalize_tiktok_url(raw_url: str) -> ReelReference | None:
         shortcode=shortcode,
         provider="tiktok",
     )
+
+
+def clean_tiktok_video_id(value: str) -> str:
+    return re.sub(r"\.html\Z", "", value, flags=re.IGNORECASE)
 
 
 def normalize_x_url(raw_url: str) -> ReelReference | None:

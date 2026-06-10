@@ -26,6 +26,7 @@ from app.services.downloader_service import (
     should_try_cobalt_fallback,
     should_retry_x_with_api_fallbacks,
     should_retry_youtube_without_webpage,
+    tiktok_public_id,
     tiktok_public_filename,
     download_failure_guidance,
     downloader_runtime_info,
@@ -446,6 +447,20 @@ def test_youtube_missing_player_response_is_retryable():
     )
 
 
+def test_youtube_generic_extraction_error_is_retryable():
+    assert should_retry_youtube_without_webpage(
+        "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+        "ERROR: [youtube] jNQXAC9IVRw: Unable to extract streaming data; HTTP Error 503: Service Unavailable",
+    )
+
+
+def test_youtube_private_error_is_not_retryable():
+    assert not should_retry_youtube_without_webpage(
+        "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+        "ERROR: [youtube] jNQXAC9IVRw: This video is private",
+    )
+
+
 def test_non_youtube_bot_error_is_not_retryable():
     assert not should_retry_youtube_without_webpage(
         "https://www.instagram.com/reel/ABC123/",
@@ -579,6 +594,17 @@ def test_extract_tiktok_public_media_urls_parses_universal_data():
     ]
 
 
+def test_extract_tiktok_public_media_urls_parses_unicode_escaped_direct_url():
+    webpage = (
+        '<script>window.__data="https:\\u002F\\u002Fv16-webapp-prime.tiktok.com'
+        '\\u002Fvideo\\u002Ftos\\u002Fuseast2a\\u002Fabc?mime_type=video_mp4"</script>'
+    )
+
+    assert extract_tiktok_public_media_urls(webpage) == [
+        "https://v16-webapp-prime.tiktok.com/video/tos/useast2a/abc?mime_type=video_mp4",
+    ]
+
+
 def test_tiktok_public_filename_uses_video_id_and_safe_extension():
     assert (
         tiktok_public_filename(
@@ -597,6 +623,17 @@ def test_tiktok_public_filename_uses_video_id_and_safe_extension():
     assert (
         tiktok_public_filename(
             "https://www.tiktok.com/embed/7253412088251534594",
+            "https://cdn.example/video.mp4?token=abc",
+        )
+        == "7253412088251534594.mp4"
+    )
+
+
+def test_tiktok_public_id_strips_mobile_html_suffix():
+    assert tiktok_public_id("https://m.tiktok.com/v/7253412088251534594.html") == "7253412088251534594"
+    assert (
+        tiktok_public_filename(
+            "https://m.tiktok.com/v/7253412088251534594.html",
             "https://cdn.example/video.mp4?token=abc",
         )
         == "7253412088251534594.mp4"
@@ -711,6 +748,14 @@ def test_extract_instagram_public_media_urls_parses_meta_and_escaped_json():
     ]
 
 
+def test_extract_instagram_public_media_urls_parses_unicode_escaped_direct_url():
+    webpage = '<script>window.__data="https:\\u002F\\u002Fcdn.example\\u002Fvideo.mp4?x=1\\u0026y=2"</script>'
+
+    assert extract_instagram_public_media_urls(webpage) == [
+        "https://cdn.example/video.mp4?x=1&y=2",
+    ]
+
+
 def test_instagram_public_filename_uses_shortcode_and_safe_extension():
     assert (
         instagram_public_filename(
@@ -722,6 +767,13 @@ def test_instagram_public_filename_uses_shortcode_and_safe_extension():
     assert (
         instagram_public_filename(
             "https://www.instagram.com/share/reel/BA123xyz/",
+            "https://cdn.example/path/video.bin?token=abc",
+        )
+        == "BA123xyz.mp4"
+    )
+    assert (
+        instagram_public_filename(
+            "https://www.instagram.com/share/BA123xyz/",
             "https://cdn.example/path/video.bin?token=abc",
         )
         == "BA123xyz.mp4"

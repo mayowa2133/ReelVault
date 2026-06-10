@@ -1378,7 +1378,9 @@ def extract_tiktok_public_media_urls(webpage: str) -> list[str]:
     for data in extract_tiktok_public_json_blocks(webpage):
         collect_tiktok_video_urls(data, candidates)
 
-    direct_url_pattern = r'https?:\\?/\\?/[^"\'<>\s]+?(?:\.mp4|/video/tos/|mime_type=video_mp4)[^"\'<>\s]*'
+    direct_url_pattern = escaped_direct_media_url_pattern(
+        r'(?:\.mp4|/video/tos/|mime_type=video_mp4|\\u002[fF]video\\u002[fF]tos\\u002[fF])'
+    )
     candidates.extend(match.group(0) for match in re.finditer(direct_url_pattern, webpage))
 
     media_urls: list[str] = []
@@ -1485,16 +1487,20 @@ def tiktok_public_id(url: str) -> str:
     host = parsed.netloc.lower().removeprefix("www.")
     parts = [part for part in parsed.path.split("/") if part]
     if len(parts) >= 3 and parts[0].startswith("@") and parts[1].lower() == "video":
-        return safe_filename_id(parts[2])
+        return safe_filename_id(clean_tiktok_video_id(parts[2]))
     if len(parts) >= 2 and parts[0].lower() == "embed":
-        return safe_filename_id(parts[1])
+        return safe_filename_id(clean_tiktok_video_id(parts[1]))
     if host in {"vm.tiktok.com", "vt.tiktok.com"} and parts:
         return safe_filename_id(parts[0])
     if len(parts) >= 2 and parts[0].lower() in {"t", "v"}:
-        return safe_filename_id(parts[1])
+        return safe_filename_id(clean_tiktok_video_id(parts[1]))
     if len(parts) >= 3 and parts[0].lower() == "share" and parts[1].lower() == "video":
-        return safe_filename_id(parts[2])
+        return safe_filename_id(clean_tiktok_video_id(parts[2]))
     return "tiktok_media"
+
+
+def clean_tiktok_video_id(value: str) -> str:
+    return re.sub(r"\.html\Z", "", value, flags=re.IGNORECASE)
 
 
 def download_instagram_public_media(
@@ -1598,7 +1604,7 @@ def extract_instagram_public_media_urls(webpage: str) -> list[str]:
     for pattern in patterns:
         candidates.extend(match.group(1) for match in re.finditer(pattern, webpage))
 
-    direct_url_pattern = r'https?:\\?/\\?/[^"\'<>\s]+?\.mp4(?:\?[^"\'<>\s]*)?'
+    direct_url_pattern = escaped_direct_media_url_pattern(r"\.mp4")
     candidates.extend(match.group(0) for match in re.finditer(direct_url_pattern, webpage))
 
     media_urls: list[str] = []
@@ -1644,6 +1650,11 @@ def decode_instagram_public_media_url(value: str) -> str | None:
     return text
 
 
+def escaped_direct_media_url_pattern(required_fragment_pattern: str) -> str:
+    prefix = r'https?(?::|\\u003[aA])(?:\\?/\\?/|\\u002[fF]\\u002[fF])'
+    return rf'{prefix}[^"\'<>\s]+?{required_fragment_pattern}[^"\'<>\s]*'
+
+
 def download_direct_media(
     client: httpx.Client,
     media_url: str,
@@ -1686,6 +1697,8 @@ def instagram_public_id(url: str) -> str:
         return safe_filename_id(parts[1])
     if len(parts) >= 3 and parts[0].lower() == "share":
         return safe_filename_id(parts[2])
+    if len(parts) >= 2 and parts[0].lower() == "share":
+        return safe_filename_id(parts[1])
     return "instagram_media"
 
 
@@ -1760,7 +1773,23 @@ def should_retry_youtube_without_webpage(url: str, error_message: str) -> bool:
         return False
 
     lowered = error_message.lower()
-    return any(
+    if any(
+        needle in lowered
+        for needle in (
+            "this video is private",
+            "private video",
+            "members-only",
+            "join this channel",
+            "has been removed",
+            "does not exist",
+            "copyright",
+            "not available in your country",
+            "rental",
+            "purchase",
+        )
+    ):
+        return False
+    if any(
         needle in lowered
         for needle in (
             "sign in to confirm",
@@ -1773,6 +1802,20 @@ def should_retry_youtube_without_webpage(url: str, error_message: str) -> bool:
             "http error 403",
             "youtube is requiring a captcha",
             "this content isn't available, try again later",
+        )
+    ):
+        return True
+    return any(
+        needle in lowered
+        for needle in (
+            "http error 5",
+            "service unavailable",
+            "temporarily unavailable",
+            "unable to extract",
+            "unable to download",
+            "incomplete data",
+            "player response",
+            "streaming data",
         )
     )
 
