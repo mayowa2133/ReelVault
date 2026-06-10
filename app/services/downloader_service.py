@@ -8,14 +8,14 @@ from pathlib import Path
 import re
 import random
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import httpx
 
 from app.config import Settings
 from app.models.schemas import DownloadResult
 from app.services.cobalt_service import CobaltService
-from app.services.youtube_mirror_service import YoutubeMirrorService
+from app.services.youtube_mirror_service import YoutubeMirrorService, youtube_video_id
 from app.utils.errors import DownloadFailedError, ExternalServiceError, public_error_message
 from app.utils.logging import get_logger
 
@@ -36,6 +36,13 @@ class YoutubeNoAuthFallbackStrategy:
     format_selector: str | None = None
     use_visitor_data: bool = False
     use_po_token: bool = False
+    url_variant: str | None = None
+
+
+@dataclass(frozen=True)
+class XNoAuthFallbackStrategy:
+    name: str
+    twitter_args: dict[str, list[str]]
 
 
 @dataclass(frozen=True)
@@ -109,6 +116,31 @@ YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES = (
         format_selector=YOUTUBE_FALLBACK_FORMAT,
     ),
     YoutubeNoAuthFallbackStrategy(
+        name="web_embedded_embed_url_no_webpage_configs",
+        youtube_args={
+            "player_client": ["web_embedded"],
+            "player_skip": ["webpage", "configs"],
+        },
+        format_selector=YOUTUBE_FALLBACK_FORMAT,
+        url_variant="embed",
+    ),
+    YoutubeNoAuthFallbackStrategy(
+        name="tv_no_webpage_configs",
+        youtube_args={
+            "player_client": ["tv"],
+            "player_skip": ["webpage", "configs"],
+        },
+        format_selector=YOUTUBE_FALLBACK_FORMAT,
+    ),
+    YoutubeNoAuthFallbackStrategy(
+        name="android_vr_no_webpage_configs",
+        youtube_args={
+            "player_client": ["android_vr"],
+            "player_skip": ["webpage", "configs"],
+        },
+        format_selector=YOUTUBE_FALLBACK_FORMAT,
+    ),
+    YoutubeNoAuthFallbackStrategy(
         name="web_with_configured_po_token",
         youtube_args={
             "player_client": ["web", "default"],
@@ -127,6 +159,13 @@ YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES = (
         format_selector=YOUTUBE_FALLBACK_FORMAT,
         use_visitor_data=True,
         use_po_token=True,
+    ),
+)
+
+X_NO_AUTH_FALLBACK_STRATEGIES = (
+    XNoAuthFallbackStrategy(
+        name="legacy_api",
+        twitter_args={"api": ["legacy"]},
     ),
 )
 
@@ -230,6 +269,21 @@ class DownloaderService:
                     )
                     if fallback_error:
                         return self._download_failed_result(fallback_error)
+            elif should_retry_x_with_api_fallbacks(url, reason):
+                info, file_path, fallback_error = self._download_with_x_fallbacks(
+                    url,
+                    output_dir,
+                    options,
+                    reason,
+                )
+                if fallback_error:
+                    info, file_path, fallback_error = self._download_with_cobalt_fallback(
+                        url,
+                        output_dir,
+                        fallback_error,
+                    )
+                    if fallback_error:
+                        return self._download_failed_result(fallback_error)
             else:
                 info, file_path, fallback_error = self._download_with_cobalt_fallback(url, output_dir, reason)
                 if fallback_error:
@@ -303,10 +357,11 @@ class DownloaderService:
                         continue
 
                 fallback_options = self._youtube_no_auth_fallback_options(options, strategy, youtube_visitor_data)
-                info, file_path = self._download_with_options(url, output_dir, fallback_options)
+                target_url = youtube_fallback_url(url, strategy.url_variant) or url
+                info, file_path = self._download_with_options(target_url, output_dir, fallback_options)
                 logger.warning(
                     "youtube_download_succeeded_with_no_auth_fallback",
-                    extra={"url": url, "strategy": strategy.name},
+                    extra={"url": url, "target_url": target_url, "strategy": strategy.name},
                 )
                 return info, file_path, None
             except Exception as fallback_exc:
@@ -439,6 +494,56 @@ class DownloaderService:
 
         return {}, None, (
             f"{initial_reason}. Instagram no-auth URL variant fallback attempts also failed: "
+            f"{summarize_attempt_errors(attempt_errors[1:])}"
+        )
+
+    def _download_with_x_fallbacks(
+        self,
+        url: str,
+        output_dir: Path,
+        options: dict[str, Any],
+        initial_reason: str,
+    ) -> tuple[dict[str, Any], Path | None, str | None]:
+        attempt_errors = [("default", initial_reason)]
+        fallback_urls = x_fallback_urls(url)
+
+        for strategy_name, fallback_url in fallback_urls:
+            try:
+                info, file_path = self._download_with_options(fallback_url, output_dir, dict(options))
+                logger.warning(
+                    "x_download_succeeded_with_url_variant_fallback",
+                    extra={"url": url, "strategy": strategy_name, "fallback_url": fallback_url},
+                )
+                return info, file_path, None
+            except Exception as fallback_exc:
+                fallback_reason = public_error_message(fallback_exc)
+                attempt_errors.append((strategy_name, fallback_reason))
+                logger.warning(
+                    "x_url_variant_fallback_failed",
+                    extra={"url": url, "strategy": strategy_name, "fallback_url": fallback_url, "error": fallback_reason},
+                )
+
+        for target_name, target_url in [("default", url), *fallback_urls]:
+            for strategy in X_NO_AUTH_FALLBACK_STRATEGIES:
+                attempt_name = strategy.name if target_name == "default" else f"{target_name}_{strategy.name}"
+                try:
+                    fallback_options = self._x_no_auth_fallback_options(options, strategy)
+                    info, file_path = self._download_with_options(target_url, output_dir, fallback_options)
+                    logger.warning(
+                        "x_download_succeeded_with_api_fallback",
+                        extra={"url": target_url, "original_url": url, "strategy": attempt_name},
+                    )
+                    return info, file_path, None
+                except Exception as fallback_exc:
+                    fallback_reason = public_error_message(fallback_exc)
+                    attempt_errors.append((attempt_name, fallback_reason))
+                    logger.warning(
+                        "x_api_fallback_failed",
+                        extra={"url": target_url, "original_url": url, "strategy": attempt_name, "error": fallback_reason},
+                    )
+
+        return {}, None, (
+            f"{initial_reason}. X/Twitter no-auth URL/API fallback attempts also failed: "
             f"{summarize_attempt_errors(attempt_errors[1:])}"
         )
 
@@ -610,6 +715,20 @@ class DownloaderService:
         fallback_options["format"] = "best[ext=mp4]/best"
         return fallback_options
 
+    def _x_no_auth_fallback_options(
+        self,
+        options: dict[str, Any],
+        strategy: XNoAuthFallbackStrategy = X_NO_AUTH_FALLBACK_STRATEGIES[0],
+    ) -> dict[str, Any]:
+        fallback_options = dict(options)
+        extractor_args = dict(fallback_options.get("extractor_args") or {})
+        twitter_args = dict(extractor_args.get("twitter") or {})
+        twitter_args.update(strategy.twitter_args)
+        extractor_args["twitter"] = twitter_args
+        fallback_options["extractor_args"] = extractor_args
+        fallback_options["format"] = "best[ext=mp4]/best"
+        return fallback_options
+
     def _youtube_visitor_data(self) -> str | None:
         if self.settings.youtube_visitor_data:
             return self.settings.youtube_visitor_data
@@ -677,6 +796,9 @@ def downloader_runtime_info(settings: Settings) -> dict[str, Any]:
         "youtube_mirror_configured": bool(settings.youtube_piped_api_base_urls or settings.youtube_invidious_base_urls),
         "youtube_piped_configured": bool(settings.youtube_piped_api_base_urls),
         "youtube_invidious_configured": bool(settings.youtube_invidious_base_urls),
+        "youtube_no_auth_fallback_strategy_count": len(YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES),
+        "tiktok_no_auth_fallback_strategy_count": len(TIKTOK_NO_AUTH_FALLBACK_STRATEGIES),
+        "x_no_auth_fallback_strategy_count": len(X_NO_AUTH_FALLBACK_STRATEGIES),
         "custom_user_agent_configured": bool(settings.social_download_user_agent),
         "custom_accept_language_configured": bool(settings.social_download_accept_language),
         "yt_dlp_retries": settings.yt_dlp_retries,
@@ -881,6 +1003,16 @@ def fetch_anonymous_youtube_visitor_data(timeout_seconds: int, user_agent: str) 
     return None
 
 
+def youtube_fallback_url(url: str, variant: str | None) -> str | None:
+    if not variant:
+        return url
+    if variant == "embed":
+        video_id = youtube_video_id(url)
+        if video_id:
+            return f"https://www.youtube.com/embed/{quote(video_id, safe='')}?html5=1"
+    return None
+
+
 def parse_extractor_args_json(value: str | None) -> dict[str, dict[str, list[str]]]:
     if not value:
         return {}
@@ -1067,6 +1199,42 @@ def fetch_tiktok_redirect_url(url: str, timeout_seconds: int, user_agent: str) -
     return None
 
 
+def x_fallback_urls(url: str) -> list[tuple[str, str]]:
+    parsed = urlsplit(url)
+    host = parsed.netloc.lower().removeprefix("www.")
+    if host not in {"x.com", "twitter.com", "mobile.twitter.com"}:
+        return []
+
+    parts = [part for part in parsed.path.split("/") if part]
+    status_index = next((index for index, part in enumerate(parts) if part.lower() in {"status", "statuses"}), None)
+    if status_index is None or len(parts) <= status_index + 1:
+        return []
+
+    status_id = parts[status_index + 1]
+    if status_index >= 2 and parts[status_index - 2].lower() == "i" and parts[status_index - 1].lower() == "web":
+        username = "i"
+    elif status_index > 0 and parts[status_index - 1].lower() != "i":
+        username = parts[status_index - 1]
+    else:
+        username = "i"
+
+    quoted_status_id = quote(status_id, safe="")
+    quoted_username = quote(username, safe="")
+    candidates = [
+        ("twitter_status_url", f"https://twitter.com/{quoted_username}/status/{quoted_status_id}"),
+        ("x_i_web_status_url", f"https://x.com/i/web/status/{quoted_status_id}"),
+        ("twitter_i_web_status_url", f"https://twitter.com/i/web/status/{quoted_status_id}"),
+        ("twitter_statuses_url", f"https://twitter.com/statuses/{quoted_status_id}"),
+    ]
+
+    normalized_current = f"{parsed.scheme}://{parsed.netloc}{parsed.path}".rstrip("/")
+    return [
+        (name, candidate)
+        for name, candidate in dedupe_named_urls(candidates)
+        if candidate.rstrip("/") != normalized_current
+    ]
+
+
 def dedupe_named_urls(named_urls: list[tuple[str, str]]) -> list[tuple[str, str]]:
     seen: set[str] = set()
     deduped: list[tuple[str, str]] = []
@@ -1145,6 +1313,10 @@ def should_retry_instagram_with_url_variants(url: str, error_message: str) -> bo
             "unsupported url",
         )
     )
+
+
+def should_retry_x_with_api_fallbacks(url: str, _error_message: str) -> bool:
+    return provider_host(url) in {"x.com", "twitter.com", "mobile.twitter.com"}
 
 
 def should_try_cobalt_fallback(url: str) -> bool:

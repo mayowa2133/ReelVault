@@ -4,6 +4,7 @@ from app.services.downloader_service import (
     TIKTOK_NO_AUTH_FALLBACK_STRATEGIES,
     YOUTUBE_FALLBACK_FORMAT,
     YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES,
+    X_NO_AUTH_FALLBACK_STRATEGIES,
     fetch_anonymous_youtube_visitor_data,
     fetch_instagram_redirect_url,
     fetch_tiktok_redirect_url,
@@ -16,9 +17,12 @@ from app.services.downloader_service import (
     should_retry_instagram_with_url_variants,
     should_retry_tiktok_with_mobile_api,
     should_try_cobalt_fallback,
+    should_retry_x_with_api_fallbacks,
     should_retry_youtube_without_webpage,
     downloader_runtime_info,
     summarize_attempt_errors,
+    x_fallback_urls,
+    youtube_fallback_url,
 )
 from app.services.cobalt_service import CobaltDownloadResult
 
@@ -336,6 +340,42 @@ def test_youtube_po_token_fallback_uses_configured_token(tmp_path):
     assert "cookiefile" not in fallback
 
 
+def test_youtube_embedded_fallback_uses_explicit_client_and_embed_url(tmp_path):
+    service = DownloaderService(Settings())
+    options = service._yt_dlp_options(str(tmp_path / "%(id)s.%(ext)s"), tmp_path)
+    strategy = next(
+        item for item in YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES if item.name == "web_embedded_embed_url_no_webpage_configs"
+    )
+
+    fallback = service._youtube_no_auth_fallback_options(options, strategy)
+
+    assert fallback["extractor_args"]["youtube"] == {
+        "player_client": ["web_embedded"],
+        "player_skip": ["webpage", "configs"],
+    }
+    assert youtube_fallback_url("https://www.youtube.com/watch?v=jNQXAC9IVRw", strategy.url_variant) == (
+        "https://www.youtube.com/embed/jNQXAC9IVRw?html5=1"
+    )
+
+
+def test_youtube_tv_and_android_vr_fallbacks_use_valid_clients(tmp_path):
+    service = DownloaderService(Settings())
+    options = service._yt_dlp_options(str(tmp_path / "%(id)s.%(ext)s"), tmp_path)
+
+    clients = {
+        strategy.name: service._youtube_no_auth_fallback_options(options, strategy)["extractor_args"]["youtube"][
+            "player_client"
+        ]
+        for strategy in YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES
+        if strategy.name in {"tv_no_webpage_configs", "android_vr_no_webpage_configs"}
+    }
+
+    assert clients == {
+        "tv_no_webpage_configs": ["tv"],
+        "android_vr_no_webpage_configs": ["android_vr"],
+    }
+
+
 def test_tiktok_mobile_api_fallback_options_configure_app_info(tmp_path, monkeypatch):
     monkeypatch.setattr("app.services.downloader_service.tiktok_install_id", lambda: "7250000000000000001")
     monkeypatch.setattr("app.services.downloader_service.tiktok_device_id", lambda: "7250000000000000002")
@@ -386,6 +426,33 @@ def test_tiktok_private_error_is_not_retryable_with_mobile_api():
         "https://www.tiktok.com/@creator/video/7253412088251534594",
         "You do not have permission to view this post. Log into an account that has access",
     )
+
+
+def test_x_public_error_is_retryable_with_api_fallback():
+    assert should_retry_x_with_api_fallbacks(
+        "https://x.com/example/status/1790637656616943991",
+        "Twitter API returned not authorized",
+    )
+
+
+def test_x_url_fallbacks_include_twitter_and_i_web_variants():
+    assert x_fallback_urls("https://x.com/example/status/1790637656616943991?s=20") == [
+        ("twitter_status_url", "https://twitter.com/example/status/1790637656616943991"),
+        ("x_i_web_status_url", "https://x.com/i/web/status/1790637656616943991"),
+        ("twitter_i_web_status_url", "https://twitter.com/i/web/status/1790637656616943991"),
+        ("twitter_statuses_url", "https://twitter.com/statuses/1790637656616943991"),
+    ]
+
+
+def test_x_legacy_api_fallback_options(tmp_path):
+    service = DownloaderService(Settings())
+    options = service._yt_dlp_options(str(tmp_path / "%(id)s.%(ext)s"), tmp_path)
+    strategy = X_NO_AUTH_FALLBACK_STRATEGIES[0]
+
+    fallback = service._x_no_auth_fallback_options(options, strategy)
+
+    assert fallback["extractor_args"]["twitter"] == {"api": ["legacy"]}
+    assert fallback["format"] == "best[ext=mp4]/best"
 
 
 def test_tiktok_short_url_detection():
@@ -617,6 +684,51 @@ def test_downloader_resolves_instagram_share_redirect_before_retry(tmp_path, mon
         "https://www.instagram.com/share/reel/BA123xyz/",
         "https://www.instagram.com/reel/ABC123/",
     ]
+
+
+def test_downloader_retries_x_with_url_variant_fallback(tmp_path, monkeypatch):
+    service = DownloaderService(Settings())
+    calls = []
+    output_file = tmp_path / "video.mp4"
+    output_file.write_bytes(b"video")
+
+    def fake_download(url, output_dir, options):
+        calls.append((url, options))
+        if len(calls) == 1:
+            raise RuntimeError("Twitter API returned not authorized")
+        if url == "https://twitter.com/example/status/1790637656616943991":
+            return {"id": "1790637656616943991", "title": "X video", "uploader": "example"}, output_file
+        raise RuntimeError("No video could be found in this tweet")
+
+    monkeypatch.setattr(service, "_download_with_options", fake_download)
+
+    result = service.download("https://x.com/example/status/1790637656616943991", tmp_path)
+
+    assert result.success is True
+    assert result.file_path == output_file
+    assert calls[1][0] == "https://twitter.com/example/status/1790637656616943991"
+
+
+def test_downloader_retries_x_with_legacy_api_after_url_variants_fail(tmp_path, monkeypatch):
+    service = DownloaderService(Settings())
+    calls = []
+    output_file = tmp_path / "video.mp4"
+    output_file.write_bytes(b"video")
+
+    def fake_download(url, output_dir, options):
+        calls.append((url, options))
+        twitter_args = options.get("extractor_args", {}).get("twitter", {})
+        if twitter_args.get("api") == ["legacy"]:
+            return {"id": "1790637656616943991", "title": "X video", "uploader": "example"}, output_file
+        raise RuntimeError("Twitter API returned not authorized")
+
+    monkeypatch.setattr(service, "_download_with_options", fake_download)
+
+    result = service.download("https://x.com/example/status/1790637656616943991", tmp_path)
+
+    assert result.success is True
+    assert result.file_path == output_file
+    assert calls[-1][1]["extractor_args"]["twitter"]["api"] == ["legacy"]
 
 
 def test_downloader_uses_visitor_data_fallback_after_non_visitor_failures(tmp_path, monkeypatch):
