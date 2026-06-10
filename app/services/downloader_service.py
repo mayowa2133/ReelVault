@@ -1792,22 +1792,17 @@ def should_retry_instagram_with_url_variants(url: str, error_message: str) -> bo
         return False
 
     lowered = error_message.lower()
-    if "only available for registered users who follow" in lowered:
-        return False
-    return any(
+    if any(
         needle in lowered
         for needle in (
-            "login required",
-            "rate-limit",
-            "empty media response",
-            "main webpage is locked",
-            "requested content is not available",
-            "http error 403",
-            "http error 429",
-            "forbidden",
-            "unsupported url",
+            "only available for registered users who follow",
+            "not authorized to view",
+            "permission to view",
+            "private",
         )
-    )
+    ):
+        return False
+    return True
 
 
 def should_retry_x_with_api_fallbacks(url: str, _error_message: str) -> bool:

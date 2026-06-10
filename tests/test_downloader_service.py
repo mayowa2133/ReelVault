@@ -467,6 +467,20 @@ def test_tiktok_private_error_is_not_retryable_with_mobile_api():
     )
 
 
+def test_instagram_generic_public_error_is_retryable_with_url_variants():
+    assert should_retry_instagram_with_url_variants(
+        "https://www.instagram.com/reel/ABC123/",
+        "ERROR: [Instagram] ABC123: Unable to extract video data",
+    )
+
+
+def test_instagram_private_error_is_not_retryable_with_url_variants():
+    assert not should_retry_instagram_with_url_variants(
+        "https://www.instagram.com/reel/ABC123/",
+        "This content is private and you do not have permission to view it",
+    )
+
+
 def test_x_public_error_is_retryable_with_api_fallback():
     assert should_retry_x_with_api_fallbacks(
         "https://x.com/example/status/1790637656616943991",
