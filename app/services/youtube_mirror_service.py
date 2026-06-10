@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 import subprocess
 from typing import Any
-from urllib.parse import parse_qs, quote, urlencode, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlencode, urljoin, urlsplit
 
 import httpx
 
@@ -167,9 +167,20 @@ def youtube_video_id(url: str) -> str | None:
         return query_id
 
     parts = [part for part in parsed.path.split("/") if part]
-    if len(parts) >= 2 and parts[0].lower() in {"shorts", "live", "embed"}:
+    if parts and parts[0].lower() == "attribution_link":
+        target_url = youtube_attribution_target_url(parse_qs(parsed.query))
+        return youtube_video_id(target_url) if target_url else None
+    if len(parts) >= 2 and parts[0].lower() in {"shorts", "live", "embed", "v", "e"}:
         return parts[1]
     return None
+
+
+def youtube_attribution_target_url(query: dict[str, list[str]]) -> str | None:
+    target = first_query_value(query, "u") or first_query_value(query, "q")
+    if not target:
+        return None
+    target = unquote(target)
+    return urljoin("https://www.youtube.com", target)
 
 
 def piped_streams_url(base_url: str, video_id: str) -> str:

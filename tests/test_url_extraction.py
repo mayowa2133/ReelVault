@@ -83,6 +83,8 @@ def test_extracts_additional_supported_social_video_url_shapes():
     references = SocialVideoService.extract_supported_urls(
         """
         clip https://www.youtube.com/clip/UgkxClip123?si=tracking
+        old-embed https://www.youtube.com/v/BaW_jenozKc?version=3
+        attribution https://www.youtube.com/attribution_link?u=%2Fwatch%3Fv%3DATTR123%26feature%3Dshare
         tiktok-share https://www.tiktok.com/share/video/7253412088251534594/?region=US
         instagram-share https://www.instagram.com/share/BA123xyz/?utm_source=ig
         twitter-legacy https://twitter.com/statuses/1790637656616943991
@@ -91,11 +93,15 @@ def test_extracts_additional_supported_social_video_url_shapes():
 
     assert [(reference.provider, reference.shortcode, reference.is_share_url) for reference in references] == [
         ("youtube", "UgkxClip123", False),
+        ("youtube", "BaW_jenozKc", False),
+        ("youtube", "ATTR123", False),
         ("tiktok", "7253412088251534594", False),
         ("instagram", "BA123xyz", True),
         ("x", "1790637656616943991", False),
     ]
     assert references[0].url == "https://www.youtube.com/clip/UgkxClip123"
-    assert references[1].url == "https://www.tiktok.com/@_/video/7253412088251534594"
-    assert references[2].url == "https://www.instagram.com/share/BA123xyz/"
-    assert references[3].url == "https://x.com/i/status/1790637656616943991"
+    assert references[1].url == "https://www.youtube.com/embed/BaW_jenozKc"
+    assert references[2].url == "https://www.youtube.com/watch?v=ATTR123"
+    assert references[3].url == "https://www.tiktok.com/@_/video/7253412088251534594"
+    assert references[4].url == "https://www.instagram.com/share/BA123xyz/"
+    assert references[5].url == "https://x.com/i/status/1790637656616943991"

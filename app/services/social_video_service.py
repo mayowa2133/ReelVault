@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qs, quote, unquote, urlencode, urljoin, urlsplit, urlunsplit
 
 from app.models.schemas import ReelReference
 
@@ -128,15 +128,21 @@ def normalize_youtube_url(raw_url: str) -> ReelReference | None:
     normalized_path = parsed.path
     normalized_query = ""
 
+    if parts and parts[0].lower() == "attribution_link":
+        target_url = youtube_attribution_target_url(query)
+        if target_url:
+            return normalize_youtube_url(target_url)
+        return None
     if parts and parts[0].lower() == "watch":
         video_id = first_query_value(query, "v")
         if not video_id:
             return None
         normalized_path = "/watch"
         normalized_query = urlencode({"v": video_id})
-    elif len(parts) >= 2 and parts[0].lower() in {"shorts", "live", "embed", "clip"}:
+    elif len(parts) >= 2 and parts[0].lower() in {"shorts", "live", "embed", "clip", "v", "e"}:
         video_id = parts[1]
-        normalized_path = f"/{parts[0].lower()}/{quote(video_id)}"
+        path_kind = {"v": "embed", "e": "embed"}.get(parts[0].lower(), parts[0].lower())
+        normalized_path = f"/{path_kind}/{quote(video_id)}"
     else:
         return None
 
@@ -146,6 +152,14 @@ def normalize_youtube_url(raw_url: str) -> ReelReference | None:
         shortcode=video_id,
         provider="youtube",
     )
+
+
+def youtube_attribution_target_url(query: dict[str, list[str]]) -> str | None:
+    target = first_query_value(query, "u") or first_query_value(query, "q")
+    if not target:
+        return None
+    target = unquote(target)
+    return urljoin("https://www.youtube.com", target)
 
 
 def normalize_tiktok_url(raw_url: str) -> ReelReference | None:
