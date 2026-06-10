@@ -310,7 +310,17 @@ class DownloaderService:
                     if fallback_error:
                         return self._download_failed_result(url, fallback_error)
             else:
-                info, file_path, fallback_error = self._download_with_cobalt_fallback(url, output_dir, reason)
+                info, file_path, fallback_error = self._download_with_youtube_mirror_fallback(
+                    url,
+                    output_dir,
+                    reason,
+                )
+                if fallback_error:
+                    info, file_path, fallback_error = self._download_with_cobalt_fallback(
+                        url,
+                        output_dir,
+                        fallback_error,
+                    )
                 if fallback_error:
                     logger.warning("reel_download_failed", extra={"error": fallback_error})
                     return self._download_failed_result(url, fallback_error)

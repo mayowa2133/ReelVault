@@ -1170,6 +1170,57 @@ def test_downloader_uses_configured_youtube_mirror_before_cobalt(tmp_path, monke
     assert result.metadata["youtube_mirror_service"] == "piped"
 
 
+def test_downloader_uses_configured_youtube_mirror_after_generic_youtube_failure(tmp_path, monkeypatch):
+    service = DownloaderService(
+        Settings(
+            youtube_piped_api_base_urls="https://piped.example",
+            cobalt_api_base_url="https://cobalt.example",
+        )
+    )
+    output_file = tmp_path / "mirror.mp4"
+
+    def fake_download(url, output_dir, options):
+        raise RuntimeError("HTTP Error 503: Service Unavailable")
+
+    class FakeMirrorService:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def download(self, url, output_dir):
+            output_file.write_bytes(b"video")
+            return type(
+                "MirrorResult",
+                (),
+                {
+                    "file_path": output_file,
+                    "info": {
+                        "id": "jNQXAC9IVRw",
+                        "title": "Mirror",
+                        "webpage_url": url,
+                        "extractor": "youtube_mirror",
+                        "youtube_mirror_service": "piped",
+                    },
+                },
+            )()
+
+    class FailingCobaltService:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def download(self, url, output_dir):
+            raise AssertionError("Cobalt should not be called when mirror fallback succeeds")
+
+    monkeypatch.setattr(service, "_download_with_options", fake_download)
+    monkeypatch.setattr("app.services.downloader_service.YoutubeMirrorService", FakeMirrorService)
+    monkeypatch.setattr("app.services.downloader_service.CobaltService", FailingCobaltService)
+
+    result = service.download("https://www.youtube.com/watch?v=jNQXAC9IVRw", tmp_path)
+
+    assert result.success is True
+    assert result.file_path == output_file
+    assert result.metadata["extractor"] == "youtube_mirror"
+
+
 def test_summarize_attempt_errors_truncates_long_reasons():
     summary = summarize_attempt_errors([("strategy", "x" * 400)])
 
