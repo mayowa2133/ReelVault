@@ -1532,6 +1532,8 @@ def decode_tiktok_public_media_url(value: str) -> str | None:
             break
 
     text = html.unescape(text).strip()
+    if text.startswith("//"):
+        text = f"https:{text}"
     if not text.startswith(("http://", "https://")):
         return None
     return text
@@ -1727,6 +1729,8 @@ def decode_instagram_public_media_url(value: str) -> str | None:
             break
 
     text = html.unescape(text).strip()
+    if text.startswith("//"):
+        text = f"https:{text}"
     if not text.startswith(("http://", "https://")):
         return None
     return text

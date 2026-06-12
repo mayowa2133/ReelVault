@@ -658,6 +658,18 @@ def test_extract_tiktok_public_media_urls_parses_meta_and_json_ld_video_keys():
     ]
 
 
+def test_extract_tiktok_public_media_urls_accepts_protocol_relative_urls():
+    webpage = """
+    <script id="SIGI_STATE" type="application/json">
+    {"ItemModule":{"725":{"video":{"playAddr":"\\/\\/v16-webapp-prime.tiktok.com\\/video\\/tos\\/useast2a\\/abc"}}}}
+    </script>
+    """
+
+    assert extract_tiktok_public_media_urls(webpage) == [
+        "https://v16-webapp-prime.tiktok.com/video/tos/useast2a/abc",
+    ]
+
+
 def test_tiktok_public_filename_uses_video_id_and_safe_extension():
     assert (
         tiktok_public_filename(
@@ -822,6 +834,14 @@ def test_extract_instagram_public_media_urls_parses_json_ld_video_keys():
     assert extract_instagram_public_media_urls(webpage) == [
         "https://cdn.example/content?id=1&type=video",
         "https://cdn.example/video?id=2&type=video",
+    ]
+
+
+def test_extract_instagram_public_media_urls_accepts_protocol_relative_urls():
+    webpage = '<script>{"video_url":"\\/\\/cdn.example\\/video.mp4?x=1\\u0026y=2"}</script>'
+
+    assert extract_instagram_public_media_urls(webpage) == [
+        "https://cdn.example/video.mp4?x=1&y=2",
     ]
 
 
