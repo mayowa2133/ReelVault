@@ -12,6 +12,10 @@ def test_health_includes_downloader_runtime_info():
     assert "service" in body["runtime"]
     assert "revision" in body["runtime"]
     assert "configuration" in body["runtime"]
+    assert body["diagnostics"]["routes"] == [
+        "/diagnostics/download",
+        "/diagnostics/normalize",
+    ]
     assert body["downloader"]["yt_dlp_available"] is True
     assert body["downloader"]["yt_dlp_version"]
     assert "yt_dlp_package_spec" in body["downloader"]

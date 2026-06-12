@@ -37,6 +37,13 @@ def health() -> dict[str, object]:
             "revision": os.getenv("K_REVISION"),
             "configuration": os.getenv("K_CONFIGURATION"),
         },
+        "diagnostics": {
+            "routes": sorted(
+                route.path
+                for route in app.routes
+                if getattr(route, "path", "").startswith("/diagnostics/")
+            ),
+        },
         "downloader": downloader_runtime_info(settings),
     }
 
