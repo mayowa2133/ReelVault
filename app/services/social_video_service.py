@@ -95,6 +95,12 @@ def normalize_instagram_url(raw_url: str) -> ReelReference | None:
             provider="instagram",
         )
 
+    if len(parts) >= 3 and parts[0].lower() == "stories":
+        user = parts[1]
+        story_id = parts[2]
+        normalized = f"https://www.instagram.com/stories/{quote(user)}/{quote(story_id)}/"
+        return ReelReference(url=normalized, raw_url=raw_url, shortcode=story_id, provider="instagram")
+
     media_index = next(
         (
             index

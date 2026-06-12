@@ -43,6 +43,20 @@ def test_extracts_instagram_reels_posts_and_tv_urls():
     ]
 
 
+def test_extracts_instagram_story_item_urls():
+    references = SocialVideoService.extract_supported_urls(
+        """
+        story https://www.instagram.com/stories/creator/3570766765028588805/?igsh=abc
+        highlight https://www.instagram.com/stories/highlights/18090946048123978/
+        """
+    )
+
+    assert [(reference.url, reference.shortcode, reference.provider) for reference in references] == [
+        ("https://www.instagram.com/stories/creator/3570766765028588805/", "3570766765028588805", "instagram"),
+        ("https://www.instagram.com/stories/highlights/18090946048123978/", "18090946048123978", "instagram"),
+    ]
+
+
 def test_extracts_multiple_unique_reel_urls():
     text = """
     First: https://instagram.com/reel/ONE123/
