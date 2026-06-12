@@ -18,7 +18,7 @@ SUPPORTED_SOCIAL_DOMAINS = (
 )
 
 SOCIAL_URL_PATTERN = re.compile(
-    r"https?://(?:[A-Za-z0-9-]+\.)?(?:instagram\.com|youtube(?:-nocookie|kids)?\.com|youtu\.be|tiktok\.com|x\.com|twitter\.com)/[^\s<>\"]+",
+    r"(?:https?:)?//(?:[A-Za-z0-9-]+\.)?(?:instagram\.com|youtube(?:-nocookie|kids)?\.com|youtu\.be|tiktok\.com|x\.com|twitter\.com)/[^\s<>\"]+",
     flags=re.IGNORECASE,
 )
 
@@ -29,6 +29,7 @@ SUPPORTED_URL_FEATURES = (
     "instagram_share_urls",
     "instagram_story_item_urls",
     "instagram_username_media_urls",
+    "protocol_relative_social_urls",
     "social_redirect_unwrapping",
     "tiktok_embed_urls",
     "tiktok_mobile_and_share_urls",
@@ -54,7 +55,7 @@ class SocialVideoService:
         found: list[ReelReference] = []
         seen: set[str] = set()
         for match in SOCIAL_URL_PATTERN.finditer(text):
-            raw_url = match.group(0).rstrip(TRAILING_PUNCTUATION)
+            raw_url = ensure_url_scheme(match.group(0).rstrip(TRAILING_PUNCTUATION))
             reference = SocialVideoService.normalize_url(raw_url)
             dedupe_key = f"{reference.provider}:{reference.shortcode or reference.url}" if reference else ""
             if reference and dedupe_key not in seen:
@@ -64,6 +65,7 @@ class SocialVideoService:
 
     @staticmethod
     def normalize_url(raw_url: str) -> ReelReference | None:
+        raw_url = ensure_url_scheme(raw_url)
         parsed = urlsplit(raw_url)
         host = parsed.netloc.lower()
         host = host.removeprefix("www.")
@@ -87,6 +89,10 @@ class SocialVideoService:
         if host in {"x.com", "twitter.com", "mobile.twitter.com"}:
             return normalize_x_url(raw_url)
         return None
+
+
+def ensure_url_scheme(raw_url: str) -> str:
+    return f"https:{raw_url}" if raw_url.startswith("//") else raw_url
 
 
 def social_redirect_target_url(parsed, host: str) -> str | None:

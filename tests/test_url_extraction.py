@@ -82,6 +82,24 @@ def test_unwraps_supported_social_redirect_urls():
     ]
 
 
+def test_extracts_protocol_relative_social_video_urls():
+    references = SocialVideoService.extract_supported_urls(
+        """
+        youtube //www.youtube.com/embed/PROTOYT1234A?rel=0
+        tiktok //www.tiktok.com/@creator/video/7253412088251534599
+        instagram //www.instagram.com/reel/PROTOIG123/
+        x //twitter.com/example/status/1790637656616943992
+        """
+    )
+
+    assert [(reference.provider, reference.shortcode, reference.url) for reference in references] == [
+        ("youtube", "PROTOYT1234A", "https://www.youtube.com/embed/PROTOYT1234A"),
+        ("tiktok", "7253412088251534599", "https://www.tiktok.com/@creator/video/7253412088251534599"),
+        ("instagram", "PROTOIG123", "https://www.instagram.com/reel/PROTOIG123/"),
+        ("x", "1790637656616943992", "https://x.com/example/status/1790637656616943992"),
+    ]
+
+
 def test_extracts_multiple_unique_reel_urls():
     text = """
     First: https://instagram.com/reel/ONE123/

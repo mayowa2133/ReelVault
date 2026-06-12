@@ -17,6 +17,7 @@ def test_health_includes_downloader_runtime_info():
         "/diagnostics/normalize",
     ]
     assert "instagram_story_item_urls" in body["url_support"]["features"]
+    assert "protocol_relative_social_urls" in body["url_support"]["features"]
     assert "social_redirect_unwrapping" in body["url_support"]["features"]
     assert "youtube_legacy_watch_query_urls" in body["url_support"]["features"]
     assert "youtube_nocookie_embed_urls" in body["url_support"]["features"]
