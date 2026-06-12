@@ -75,6 +75,24 @@ def test_normalize_diagnostic_returns_normalized_reference(tmp_path):
     assert body["downloader"]["yt_dlp_available"] is True
 
 
+def test_normalize_diagnostic_accepts_protocol_relative_url(tmp_path):
+    client = build_client(Settings(task_request_secret="expected-secret", temp_dir=tmp_path))
+
+    response = client.post(
+        "/diagnostics/normalize",
+        json={"url": "//www.youtube.com/embed/PROTOYT1234A?rel=0"},
+        headers={"X-ReelVault-Task-Secret": "expected-secret"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["provider"] == "youtube"
+    assert body["url"] == "https://www.youtube.com/embed/PROTOYT1234A"
+    assert body["raw_url"] == "https://www.youtube.com/embed/PROTOYT1234A?rel=0"
+    assert body["shortcode"] == "PROTOYT1234A"
+
+
 def test_download_diagnostic_calls_downloader(tmp_path, monkeypatch):
     output_file = tmp_path / "video.mp4"
 

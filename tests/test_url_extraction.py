@@ -100,6 +100,15 @@ def test_extracts_protocol_relative_social_video_urls():
     ]
 
 
+def test_normalizes_protocol_relative_social_video_url():
+    reference = SocialVideoService.normalize_url("//www.youtube.com/embed/PROTOYT1234A?rel=0")
+
+    assert reference is not None
+    assert reference.provider == "youtube"
+    assert reference.shortcode == "PROTOYT1234A"
+    assert reference.url == "https://www.youtube.com/embed/PROTOYT1234A"
+
+
 def test_extracts_multiple_unique_reel_urls():
     text = """
     First: https://instagram.com/reel/ONE123/
