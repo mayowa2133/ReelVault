@@ -28,6 +28,7 @@ INSTAGRAM_SHORTCODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxy
 SUPPORTED_URL_FEATURES = (
     "instagram_deep_link_media_urls",
     "instagram_media_urls",
+    "instagram_reels_audio_pages_ignored",
     "instagram_share_urls",
     "instagram_story_item_urls",
     "instagram_username_media_urls",
@@ -40,6 +41,7 @@ SUPPORTED_URL_FEATURES = (
     "youtube_clip_urls",
     "youtube_legacy_watch_query_urls",
     "youtube_nocookie_embed_urls",
+    "youtube_non_video_embed_urls_ignored",
     "youtube_redirect_urls",
     "youtube_shorts_live_embed_urls",
     "youtube_source_shorts_urls",
