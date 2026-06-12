@@ -170,6 +170,8 @@ def youtube_video_id(url: str) -> str | None:
     if parts and parts[0].lower() == "attribution_link":
         target_url = youtube_attribution_target_url(parse_qs(parsed.query))
         return youtube_video_id(target_url) if target_url else None
+    if len(parts) >= 3 and parts[0].lower() == "source" and parts[2].lower() == "shorts":
+        return parts[1]
     if len(parts) >= 2 and parts[0].lower() in {"shorts", "live", "embed", "v", "e"}:
         return parts[1]
     return None

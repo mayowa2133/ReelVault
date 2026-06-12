@@ -188,6 +188,9 @@ def normalize_youtube_url(raw_url: str) -> ReelReference | None:
             return None
         normalized_path = "/watch"
         normalized_query = urlencode({"v": video_id})
+    elif len(parts) >= 3 and parts[0].lower() == "source" and parts[2].lower() == "shorts":
+        video_id = parts[1]
+        normalized_path = f"/shorts/{quote(video_id)}"
     elif len(parts) >= 2 and parts[0].lower() in {"shorts", "live", "embed", "clip", "v", "e"}:
         video_id = parts[1]
         path_kind = {"v": "embed", "e": "embed"}.get(parts[0].lower(), parts[0].lower())

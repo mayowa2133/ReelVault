@@ -22,6 +22,7 @@ def test_youtube_video_id_handles_common_url_shapes():
     assert youtube_video_id("https://www.youtube.com/watch?v=jNQXAC9IVRw") == "jNQXAC9IVRw"
     assert youtube_video_id("https://youtu.be/jNQXAC9IVRw") == "jNQXAC9IVRw"
     assert youtube_video_id("https://www.youtube.com/shorts/XnjiprcNurg") == "XnjiprcNurg"
+    assert youtube_video_id("https://www.youtube.com/source/SRC12345678/shorts?feature=share") == "SRC12345678"
     assert youtube_video_id("https://www.youtube.com/v/jNQXAC9IVRw?version=3") == "jNQXAC9IVRw"
     assert youtube_video_id("https://www.youtube.com/e/jNQXAC9IVRw") == "jNQXAC9IVRw"
     assert (
