@@ -195,6 +195,22 @@ def test_extracts_youtube_wrapper_host_urls():
     ]
 
 
+def test_extracts_youtube_invidious_video_urls():
+    references = SocialVideoService.extract_supported_urls(
+        """
+        invidio https://invidio.us/watch?v=BaW_jenozKc
+        redirect https://redirect.invidious.io/Yh0AhrY9GjA
+        yewtu https://yewtu.be/embed/INVVID0001A
+        """
+    )
+
+    assert [(reference.shortcode, reference.url) for reference in references] == [
+        ("BaW_jenozKc", "https://www.youtube.com/watch?v=BaW_jenozKc"),
+        ("Yh0AhrY9GjA", "https://youtu.be/Yh0AhrY9GjA"),
+        ("INVVID0001A", "https://www.youtube.com/embed/INVVID0001A"),
+    ]
+
+
 def test_extracts_protocol_relative_social_video_urls():
     references = SocialVideoService.extract_supported_urls(
         """

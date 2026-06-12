@@ -6,6 +6,86 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urljoin, urlsplit,
 from app.models.schemas import ReelReference
 
 
+YOUTUBE_INVIDIOUS_HOSTS = (
+    "dev.invidio.us",
+    "fi.invidious.snopyta.org",
+    "invidio.us",
+    "invidiou.sh",
+    "invidiou.site",
+    "invidious-us.kavin.rocks",
+    "invidious.048596.xyz",
+    "invidious.13ad.de",
+    "invidious.baczek.me",
+    "invidious.blamefran.net",
+    "invidious.dhusch.de",
+    "invidious.drivet.xyz",
+    "invidious.drycat.fr",
+    "invidious.epicsite.xyz",
+    "invidious.esmailelbob.xyz",
+    "invidious.ethibox.fr",
+    "invidious.exonip.de",
+    "invidious.fdn.fr",
+    "invidious.flokinet.to",
+    "invidious.ggc-project.de",
+    "invidious.himiko.cloud",
+    "invidious.kabi.tk",
+    "invidious.lidarshield.cloud",
+    "invidious.mastodon.host",
+    "invidious.moomoo.de",
+    "invidious.namazso.eu",
+    "invidious.nerdvpn.de",
+    "invidious.nixnet.xyz",
+    "invidious.privacydev.net",
+    "invidious.pussthecat.org",
+    "invidious.reallyancient.tech",
+    "invidious.riverside.rocks",
+    "invidious.sethforprivacy.com",
+    "invidious.silkky.cloud",
+    "invidious.silur.me",
+    "invidious.site",
+    "invidious.slipfox.xyz",
+    "invidious.snopyta.org",
+    "invidious.tiekoetter.com",
+    "invidious.tinfoil-hat.net",
+    "invidious.toot.koeln",
+    "invidious.tube",
+    "invidious.weblibre.org",
+    "invidious.xyz",
+    "invidious.zapashcanon.fr",
+    "invidious.zee.li",
+    "inv.bp.projectsegfau.lt",
+    "inv.odyssey346.dev",
+    "inv.riverside.rocks",
+    "inv.skyn3t.in",
+    "inv.vern.cc",
+    "inv.vern.i2p",
+    "iv.ggtyler.dev",
+    "iv.melmac.space",
+    "no.invidiou.sh",
+    "piped.kavin.rocks",
+    "redirect.invidious.io",
+    "tube.connect.cafe",
+    "tube.poal.co",
+    "vid.mint.lgbt",
+    "vid.priv.au",
+    "vid.puffyan.us",
+    "vid.wxzm.sx",
+    "watch.nettohikari.com",
+    "watch.thekitty.zone",
+    "y.com.sb",
+    "yewtu.be",
+    "yt.artemislena.eu",
+    "yt.cyberhost.uk",
+    "yt.elukerio.org",
+    "yt.funami.tech",
+    "yt.lelux.fi",
+    "yt.maisputain.ovh",
+    "yt.oelrichsgarcia.de",
+    "ytb.trom.tf",
+    "ytprivate.com",
+)
+
+
 SUPPORTED_SOCIAL_DOMAINS = (
     "cleanvideosearch.com",
     "consent.youtube.com",
@@ -26,10 +106,13 @@ SUPPORTED_SOCIAL_DOMAINS = (
     "tiktok.com",
     "x.com",
     "twitter.com",
+    *YOUTUBE_INVIDIOUS_HOSTS,
 )
 
+SUPPORTED_WEB_DOMAIN_PATTERN = "|".join(re.escape(domain) for domain in sorted(SUPPORTED_SOCIAL_DOMAINS, key=len, reverse=True))
+
 SOCIAL_URL_PATTERN = re.compile(
-    r"(?:instagram://media\?id=[^\s<>\"]+|(?:https?:)?//(?:[A-Za-z0-9-]+\.)?(?:cleanvideosearch\.com|deturl\.com|hooktube\.com|instagram\.com|pwnyoutube\.com|tube\.majestyc\.net|youtube\.googleapis\.com|youtube(?:-nocookie|kids)?\.com|youtu\.be|yourepeat\.com|vid\.plus|zwearz\.com|tiktok\.com|x\.com|twitter\.com)/[^\s<>\"]+)",
+    rf"(?:instagram://media\?id=[^\s<>\"]+|(?:https?:)?//(?:[A-Za-z0-9-]+\.)?(?:{SUPPORTED_WEB_DOMAIN_PATTERN})/[^\s<>\"]+)",
     flags=re.IGNORECASE,
 )
 
@@ -54,6 +137,7 @@ SUPPORTED_URL_FEATURES = (
     "youtube_consent_redirect_urls",
     "youtube_fragment_urls",
     "youtube_googleapis_urls",
+    "youtube_invidious_urls",
     "youtube_legacy_watch_query_urls",
     "youtube_nocookie_embed_urls",
     "youtube_non_video_embed_urls_ignored",
@@ -114,6 +198,7 @@ class SocialVideoService:
             "yourepeat.com",
             "vid.plus",
             "zwearz.com",
+            *YOUTUBE_INVIDIOUS_HOSTS,
         }:
             return normalize_youtube_url(raw_url)
         if host in {"tiktok.com", "m.tiktok.com", "vm.tiktok.com", "vt.tiktok.com"}:
@@ -291,6 +376,17 @@ def normalize_youtube_url(raw_url: str) -> ReelReference | None:
         query = parse_query_values(parsed.query)
     elif host in youtube_wrapper_hosts:
         host = "youtube.com"
+    elif host in YOUTUBE_INVIDIOUS_HOSTS:
+        parts = [unquote(part) for part in parsed.path.split("/") if part]
+        if len(parts) == 1 and looks_like_youtube_video_id(parts[0]):
+            video_id = parts[0]
+            return ReelReference(
+                url=f"https://youtu.be/{quote(video_id)}",
+                raw_url=raw_url,
+                shortcode=video_id,
+                provider="youtube",
+            )
+        host = "youtube.com"
 
     if host not in {
         "youtube.com",
@@ -368,6 +464,10 @@ def youtube_fragment_query(fragment: str) -> dict[str, list[str]]:
     if "?" in fragment:
         fragment = fragment.split("?", 1)[1]
     return parse_query_values(fragment)
+
+
+def looks_like_youtube_video_id(value: str) -> bool:
+    return bool(re.fullmatch(r"[0-9A-Za-z_-]{11}", value or ""))
 
 
 def normalize_tiktok_url(raw_url: str) -> ReelReference | None:
