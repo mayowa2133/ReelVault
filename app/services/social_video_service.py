@@ -119,10 +119,11 @@ def normalize_instagram_url(raw_url: str) -> ReelReference | None:
         "p": "p",
         "tv": "tv",
     }
-    if len(parts) >= 3 and parts[0].lower() == "share" and parts[1].lower() in {"reel", "p", "tv"}:
+    if len(parts) >= 3 and parts[0].lower() == "share" and parts[1].lower() in {"reel", "reels", "p", "tv"}:
         media_kind = parts[1].lower()
         share_token = parts[2]
-        normalized = f"https://www.instagram.com/share/{media_kind}/{quote(share_token)}/"
+        normalized_media_kind = "reel" if media_kind == "reels" else media_kind
+        normalized = f"https://www.instagram.com/share/{normalized_media_kind}/{quote(share_token)}/"
         return ReelReference(
             url=normalized,
             raw_url=raw_url,

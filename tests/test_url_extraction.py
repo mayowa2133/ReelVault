@@ -21,6 +21,15 @@ def test_extracts_share_reel_url():
     assert reels[0].is_share_url is True
 
 
+def test_extracts_plural_share_reels_url():
+    reels = InstagramService.extract_reel_urls("https://www.instagram.com/share/reels/PLURAL123xyz/?utm_source=ig")
+
+    assert len(reels) == 1
+    assert reels[0].url == "https://www.instagram.com/share/reel/PLURAL123xyz/"
+    assert reels[0].shortcode == "PLURAL123xyz"
+    assert reels[0].is_share_url is True
+
+
 def test_extracts_instagram_reels_posts_and_tv_urls():
     references = InstagramService.extract_reel_urls(
         """
