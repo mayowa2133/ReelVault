@@ -170,6 +170,8 @@ def normalize_instagram_url(raw_url: str) -> ReelReference | None:
     if media_index is not None and len(parts) > media_index + 1:
         media_kind = parts[media_index].lower()
         shortcode = parts[media_index + 1]
+        if media_kind in {"reel", "reels"} and shortcode.lower() == "audio":
+            return None
         normalized = f"https://www.instagram.com/{canonical_media_kinds[media_kind]}/{quote(shortcode)}/"
         return ReelReference(url=normalized, raw_url=raw_url, shortcode=shortcode, provider="instagram")
 

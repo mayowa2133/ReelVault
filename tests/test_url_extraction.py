@@ -146,6 +146,14 @@ def test_ignores_non_reel_urls():
     assert reels == []
 
 
+def test_ignores_instagram_reels_audio_pages():
+    references = SocialVideoService.extract_supported_urls(
+        "Audio page https://www.instagram.com/reels/audio/1234567890/?igsh=abc is not a video."
+    )
+
+    assert references == []
+
+
 def test_extracts_supported_social_video_urls():
     references = SocialVideoService.extract_supported_urls(
         """
