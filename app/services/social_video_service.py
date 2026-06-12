@@ -11,6 +11,7 @@ SUPPORTED_SOCIAL_DOMAINS = (
     "deturl.com",
     "hooktube.com",
     "instagram.com",
+    "m.instagram.com",
     "pwnyoutube.com",
     "tube.majestyc.net",
     "youtube.com",
@@ -37,6 +38,7 @@ INSTAGRAM_SHORTCODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxy
 SUPPORTED_URL_FEATURES = (
     "instagram_deep_link_media_urls",
     "instagram_media_urls",
+    "instagram_mobile_urls",
     "instagram_reels_audio_pages_ignored",
     "instagram_share_urls",
     "instagram_story_item_urls",
@@ -92,7 +94,7 @@ class SocialVideoService:
         if (target_url := social_redirect_target_url(parsed, host)) and target_url != raw_url:
             return SocialVideoService.normalize_url(target_url)
 
-        if host == "instagram.com":
+        if host in {"instagram.com", "m.instagram.com"}:
             return normalize_instagram_url(raw_url)
         if host in {
             "cleanvideosearch.com",
@@ -143,7 +145,7 @@ def social_redirect_target_url(parsed, host: str) -> str | None:
 def normalize_instagram_url(raw_url: str) -> ReelReference | None:
     parsed = urlsplit(raw_url)
     host = parsed.netloc.lower()
-    if host not in {"instagram.com", "www.instagram.com"}:
+    if host not in {"instagram.com", "www.instagram.com", "m.instagram.com"}:
         return None
 
     parts = [unquote(part) for part in parsed.path.split("/") if part]

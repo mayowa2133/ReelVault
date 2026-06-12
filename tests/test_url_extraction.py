@@ -52,6 +52,22 @@ def test_extracts_instagram_reels_posts_and_tv_urls():
     ]
 
 
+def test_extracts_mobile_instagram_media_urls():
+    references = SocialVideoService.extract_supported_urls(
+        """
+        reel https://m.instagram.com/reel/MOBILE123/?igsh=abc
+        post https://m.instagram.com/p/MOBILEPOST456/?utm_source=ig
+        share https://m.instagram.com/share/reel/MOBILESHARE789/?utm_source=ig
+        """
+    )
+
+    assert [(reference.url, reference.shortcode, reference.is_share_url) for reference in references] == [
+        ("https://www.instagram.com/reel/MOBILE123/", "MOBILE123", False),
+        ("https://www.instagram.com/p/MOBILEPOST456/", "MOBILEPOST456", False),
+        ("https://www.instagram.com/share/reel/MOBILESHARE789/", "MOBILESHARE789", True),
+    ]
+
+
 def test_extracts_instagram_story_item_urls():
     references = SocialVideoService.extract_supported_urls(
         """
