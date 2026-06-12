@@ -9,6 +9,7 @@ from app.models.schemas import ReelReference
 SUPPORTED_SOCIAL_DOMAINS = (
     "instagram.com",
     "youtube.com",
+    "youtube.googleapis.com",
     "youtube-nocookie.com",
     "youtubekids.com",
     "youtu.be",
@@ -18,7 +19,7 @@ SUPPORTED_SOCIAL_DOMAINS = (
 )
 
 SOCIAL_URL_PATTERN = re.compile(
-    r"(?:instagram://media\?id=[^\s<>\"]+|(?:https?:)?//(?:[A-Za-z0-9-]+\.)?(?:instagram\.com|youtube(?:-nocookie|kids)?\.com|youtu\.be|tiktok\.com|x\.com|twitter\.com)/[^\s<>\"]+)",
+    r"(?:instagram://media\?id=[^\s<>\"]+|(?:https?:)?//(?:[A-Za-z0-9-]+\.)?(?:instagram\.com|youtube\.googleapis\.com|youtube(?:-nocookie|kids)?\.com|youtu\.be|tiktok\.com|x\.com|twitter\.com)/[^\s<>\"]+)",
     flags=re.IGNORECASE,
 )
 
@@ -40,6 +41,7 @@ SUPPORTED_URL_FEATURES = (
     "youtube_attribution_urls",
     "youtube_clip_urls",
     "youtube_fragment_urls",
+    "youtube_googleapis_urls",
     "youtube_legacy_watch_query_urls",
     "youtube_nocookie_embed_urls",
     "youtube_non_video_embed_urls_ignored",
@@ -87,6 +89,7 @@ class SocialVideoService:
             "youtube.com",
             "m.youtube.com",
             "music.youtube.com",
+            "youtube.googleapis.com",
             "youtube-nocookie.com",
             "youtubekids.com",
             "youtu.be",
@@ -228,7 +231,14 @@ def normalize_youtube_url(raw_url: str) -> ReelReference | None:
             provider="youtube",
         )
 
-    if host not in {"youtube.com", "m.youtube.com", "music.youtube.com", "youtube-nocookie.com", "youtubekids.com"}:
+    if host not in {
+        "youtube.com",
+        "m.youtube.com",
+        "music.youtube.com",
+        "youtube.googleapis.com",
+        "youtube-nocookie.com",
+        "youtubekids.com",
+    }:
         return None
 
     if target_url := youtube_fragment_target_url(parsed):
