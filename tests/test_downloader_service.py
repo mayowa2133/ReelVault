@@ -204,6 +204,7 @@ def test_downloader_runtime_info_includes_package_spec(monkeypatch):
     assert info["yt_dlp_package_spec"] == "yt-dlp @ https://example.test/archive.tar.gz"
     assert info["yt_dlp_plugin_package_specs"] == "bgutil-ytdlp-pot-provider==1.3.1"
     assert info["youtube_po_token_provider_version"] == "1.3.1"
+    assert info["cobalt_api_base_url_count"] == 0
     assert info["youtube_pot_bgutil_base_url_configured"] is False
     assert info["youtube_pot_bgutil_script_server_home_configured"] is False
     assert info["youtube_pot_bgutil_http_provider_reachable"] is None
@@ -214,6 +215,13 @@ def test_downloader_runtime_info_includes_package_spec(monkeypatch):
     assert info["tiktok_public_media_fallback_enabled"] is True
     assert "youtube_po_token_provider_plugins_available" in info
     assert "youtube_po_token_provider_plugins" in info
+
+
+def test_downloader_runtime_info_counts_cobalt_base_urls():
+    info = downloader_runtime_info(Settings(cobalt_api_base_url="https://a.example,https://b.example"))
+
+    assert info["cobalt_configured"] is True
+    assert info["cobalt_api_base_url_count"] == 2
 
 
 def test_downloader_runtime_info_pings_bgutil_http_provider(monkeypatch):

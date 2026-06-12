@@ -25,40 +25,49 @@ class CobaltService:
         self.settings = settings
 
     def enabled(self) -> bool:
-        return bool(self.settings.cobalt_api_base_url)
+        return bool(self.base_urls())
+
+    def base_urls(self) -> list[str]:
+        return parse_cobalt_base_urls(self.settings.cobalt_api_base_url)
 
     def download(self, url: str, output_dir: Path) -> CobaltDownloadResult:
-        if not self.settings.cobalt_api_base_url:
+        base_urls = self.base_urls()
+        if not base_urls:
             raise DownloadFailedError("Cobalt API fallback is not configured", step="download")
 
         output_dir.mkdir(parents=True, exist_ok=True)
-        request_url = cobalt_endpoint_url(self.settings.cobalt_api_base_url)
         headers = self._headers()
         payload = self._payload(url)
+        attempt_errors: list[tuple[str, str]] = []
 
-        try:
-            with httpx.Client(timeout=self.settings.cobalt_timeout_seconds, follow_redirects=True) as client:
-                response = client.post(request_url, json=payload, headers=headers)
-                response.raise_for_status()
-                response_data = response.json()
-                download_url, filename = select_cobalt_download(response_data)
-                file_path = unique_output_path(output_dir / safe_cobalt_filename(filename, url))
-                self._download_media(client, download_url, file_path)
-        except DownloadFailedError:
-            raise
-        except Exception as exc:
-            raise DownloadFailedError(f"Cobalt API request failed: {public_error_message(exc)}", step="download") from exc
+        with httpx.Client(timeout=self.settings.cobalt_timeout_seconds, follow_redirects=True) as client:
+            for base_url in base_urls:
+                try:
+                    request_url = cobalt_endpoint_url(base_url)
+                    response = client.post(request_url, json=payload, headers=headers)
+                    response.raise_for_status()
+                    response_data = response.json()
+                    download_url, filename = select_cobalt_download(response_data)
+                    file_path = unique_output_path(output_dir / safe_cobalt_filename(filename, url))
+                    self._download_media(client, download_url, file_path)
+                    return CobaltDownloadResult(
+                        file_path=file_path,
+                        info={
+                            "id": cobalt_source_id(url),
+                            "title": file_path.stem,
+                            "webpage_url": url,
+                            "extractor": "cobalt",
+                            "cobalt_status": response_data.get("status"),
+                            "cobalt_service": response_data.get("service"),
+                            "cobalt_base_url": base_url,
+                        },
+                    )
+                except Exception as exc:
+                    attempt_errors.append((base_url, public_error_message(exc)))
 
-        return CobaltDownloadResult(
-            file_path=file_path,
-            info={
-                "id": cobalt_source_id(url),
-                "title": file_path.stem,
-                "webpage_url": url,
-                "extractor": "cobalt",
-                "cobalt_status": response_data.get("status"),
-                "cobalt_service": response_data.get("service"),
-            },
+        raise DownloadFailedError(
+            f"Cobalt API fallback attempts failed: {summarize_cobalt_attempts(attempt_errors)}",
+            step="download",
         )
 
     def _headers(self) -> dict[str, str]:
@@ -116,6 +125,24 @@ def cobalt_endpoint_url(base_url: str) -> str:
     return base_url.rstrip("/") + "/"
 
 
+def parse_cobalt_base_urls(value: str | None) -> list[str]:
+    if not value:
+        return []
+    urls: list[str] = []
+    seen: set[str] = set()
+    for item in re.split(r"[\n,]+", value):
+        url = item.strip().rstrip("/")
+        if not url or url in seen:
+            continue
+        urls.append(url)
+        seen.add(url)
+    return urls
+
+
+def summarize_cobalt_attempts(attempt_errors: list[tuple[str, str]]) -> str:
+    return "; ".join(f"{base_url}: {short_error(reason)}" for base_url, reason in attempt_errors)
+
+
 def select_cobalt_download(response_data: dict[str, Any]) -> tuple[str, str | None]:
     status = response_data.get("status")
 
@@ -157,6 +184,13 @@ def safe_cobalt_filename(filename: str | None, source_url: str) -> str:
     if "." not in Path(candidate).name:
         candidate = f"{candidate}.mp4"
     return candidate
+
+
+def short_error(reason: str, max_length: int = 300) -> str:
+    compact = " ".join(reason.split())
+    if len(compact) <= max_length:
+        return compact
+    return f"{compact[: max_length - 3]}..."
 
 
 def cobalt_source_id(source_url: str) -> str:

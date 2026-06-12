@@ -147,7 +147,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `YT_DLP_SLEEP_REQUESTS_SECONDS` | Optional delay between yt-dlp extraction requests. Useful when public guest sessions hit rate limits. |
 | `YT_DLP_SLEEP_INTERVAL_SECONDS` | Optional minimum delay before each yt-dlp media download. |
 | `YT_DLP_MAX_SLEEP_INTERVAL_SECONDS` | Optional maximum randomized delay before each yt-dlp media download. Used only when `YT_DLP_SLEEP_INTERVAL_SECONDS` is set. |
-| `COBALT_API_BASE_URL` | Optional Cobalt API base URL. When set, ReelVault tries Cobalt after yt-dlp/provider-specific anonymous fallbacks fail. |
+| `COBALT_API_BASE_URL` | Optional Cobalt API base URL, or comma/newline-separated base URLs for failover. When set, ReelVault tries Cobalt after yt-dlp/provider-specific anonymous fallbacks fail. |
 | `COBALT_API_KEY` | Optional Cobalt API key. Sent as `Authorization: Api-Key ...` for protected Cobalt instances. |
 | `COBALT_VIDEO_QUALITY` | Requested Cobalt video quality, defaults to `720` to control Cloud Run temp storage and Drive size. |
 | `COBALT_TIMEOUT_SECONDS` | Timeout for Cobalt API and tunnel downloads, defaults to `300`. |
@@ -380,7 +380,7 @@ If the problem is Cloud Run egress, browser/TLS fingerprinting, transient provid
 {"youtube":{"player_client":["mweb"],"fetch_pot":["always"]},"instagram":{"app_id":["936619743392459"]}}
 ```
 
-If every built-in anonymous path fails and `COBALT_API_BASE_URL` is configured, ReelVault calls a Cobalt API instance as a server-side fallback. Cobalt can return a proxied tunnel, redirect, picker, or error response; ReelVault accepts tunnel/redirect responses and the first video item from picker responses. Cobalt software is free/open-source, but running it is not automatically free: you pay or consume free-tier quota for the host, bandwidth, and any egress. Do not rely on public Cobalt instances unless you operate them or have permission.
+If every built-in anonymous path fails and `COBALT_API_BASE_URL` is configured, ReelVault calls one or more Cobalt API instances as a server-side fallback. Set comma/newline-separated base URLs to try another instance when the first one errors. Cobalt can return a proxied tunnel, redirect, picker, or error response; ReelVault accepts tunnel/redirect responses and the first video item from picker responses. Cobalt software is free/open-source, but running it is not automatically free: you pay or consume free-tier quota for the host, bandwidth, and any egress. Do not rely on public Cobalt instances unless you operate them or have permission.
 
 For YouTube only, `YOUTUBE_PIPED_API_BASE_URLS` and `YOUTUBE_INVIDIOUS_BASE_URLS` add another no-cookie fallback after yt-dlp fails and before Cobalt. These call unauthenticated Piped `/streams/{videoId}` or Invidious `/api/v1/videos/{videoId}?local=true` APIs through the configured instance. ReelVault prefers progressive MP4 media when available; if the mirror only exposes separate adaptive video and audio streams, ReelVault downloads both and merges them with FFmpeg into an MKV before the normal audio extraction step. Public instances may be blocked, rate limited, or disallow heavy use; use your own instance or one where you have permission.
 

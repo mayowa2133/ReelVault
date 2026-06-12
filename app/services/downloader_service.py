@@ -15,7 +15,7 @@ import httpx
 
 from app.config import Settings
 from app.models.schemas import DownloadResult
-from app.services.cobalt_service import CobaltService, unique_output_path
+from app.services.cobalt_service import CobaltService, parse_cobalt_base_urls, unique_output_path
 from app.services.youtube_mirror_service import YoutubeMirrorService, youtube_video_id
 from app.utils.errors import DownloadFailedError, ExternalServiceError, public_error_message
 from app.utils.logging import get_logger
@@ -870,6 +870,7 @@ def downloader_runtime_info(settings: Settings) -> dict[str, Any]:
         "youtube_po_token_provider_version": os.getenv("REELVAULT_YOUTUBE_PO_TOKEN_PROVIDER_VERSION") or None,
         "auth_cookies_enabled": settings.enable_auth_cookies,
         "cobalt_configured": bool(settings.cobalt_api_base_url),
+        "cobalt_api_base_url_count": len(parse_cobalt_base_urls(settings.cobalt_api_base_url)),
         "proxy_configured": bool(settings.social_download_proxy_url),
         "impersonation_configured": bool(settings.yt_dlp_impersonate_client),
         "custom_extractor_args_configured": bool(settings.social_extractor_args_json),
