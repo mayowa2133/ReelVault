@@ -239,6 +239,38 @@ TIKTOK_NO_AUTH_FALLBACK_STRATEGIES = (
         aid="0",
         api_hostname="api22-normal-c-alisg.tiktokv.com",
     ),
+    TikTokNoAuthFallbackStrategy(
+        name="mobile_api_musical_ly_official_useast",
+        app_name="musical_ly",
+        app_version="35.1.3",
+        manifest_app_version="2023501030",
+        aid="1233",
+        api_hostname="api16-normal-c-useast1a.tiktokv.com",
+    ),
+    TikTokNoAuthFallbackStrategy(
+        name="mobile_api_musical_ly_official_alisg",
+        app_name="musical_ly",
+        app_version="35.1.3",
+        manifest_app_version="2023501030",
+        aid="1233",
+        api_hostname="api22-normal-c-alisg.tiktokv.com",
+    ),
+    TikTokNoAuthFallbackStrategy(
+        name="mobile_api_trill_useast",
+        app_name="trill",
+        app_version="35.1.3",
+        manifest_app_version="2023501030",
+        aid="1180",
+        api_hostname="api16-normal-c-useast1a.tiktokv.com",
+    ),
+    TikTokNoAuthFallbackStrategy(
+        name="mobile_api_aweme_useast",
+        app_name="aweme",
+        app_version="35.1.3",
+        manifest_app_version="2023501030",
+        aid="1128",
+        api_hostname="api16-normal-c-useast1a.tiktokv.com",
+    ),
 )
 
 

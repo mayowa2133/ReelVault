@@ -213,6 +213,7 @@ def test_downloader_runtime_info_includes_package_spec(monkeypatch):
     assert info["youtube_pot_bgutil_http_provider_error"] is None
     assert info["instagram_public_media_fallback_enabled"] is True
     assert info["tiktok_public_media_fallback_enabled"] is True
+    assert info["tiktok_no_auth_fallback_strategy_count"] == len(TIKTOK_NO_AUTH_FALLBACK_STRATEGIES)
     assert "youtube_po_token_provider_plugins_available" in info
     assert "youtube_po_token_provider_plugins" in info
 
@@ -451,6 +452,20 @@ def test_tiktok_mobile_api_fallback_options_configure_app_info(tmp_path, monkeyp
         "device_id": ["7250000000000000002"],
     }
     assert fallback["format"] == "best[ext=mp4]/best"
+
+
+def test_tiktok_mobile_api_fallbacks_include_official_app_ids():
+    strategy_keys = {
+        (strategy.app_name, strategy.aid, strategy.api_hostname)
+        for strategy in TIKTOK_NO_AUTH_FALLBACK_STRATEGIES
+    }
+
+    assert ("musical_ly", "0", "api16-normal-c-useast1a.tiktokv.com") in strategy_keys
+    assert ("musical_ly", "1233", "api16-normal-c-useast1a.tiktokv.com") in strategy_keys
+    assert ("musical_ly", "1233", "api22-normal-c-alisg.tiktokv.com") in strategy_keys
+    assert ("trill", "1180", "api16-normal-c-useast1a.tiktokv.com") in strategy_keys
+    assert ("trill", "1180", "api22-normal-c-alisg.tiktokv.com") in strategy_keys
+    assert ("aweme", "1128", "api16-normal-c-useast1a.tiktokv.com") in strategy_keys
 
 
 def test_youtube_bot_error_is_retryable():
