@@ -1662,7 +1662,11 @@ def extract_instagram_public_media_urls(webpage: str) -> list[str]:
 
     patterns = (
         r'"video_url"\s*:\s*"([^"]+)"',
+        r'"videoUrl"\s*:\s*"([^"]+)"',
+        r'"contentUrl"\s*:\s*"([^"]+)"',
         r'&quot;video_url&quot;\s*:\s*&quot;([^&]+)&quot;',
+        r'&quot;videoUrl&quot;\s*:\s*&quot;([^&]+)&quot;',
+        r'&quot;contentUrl&quot;\s*:\s*&quot;([^&]+)&quot;',
         r'"video_versions"\s*:\s*\[[^\]]*?"url"\s*:\s*"([^"]+)"',
         r'&quot;video_versions&quot;\s*:\s*\[[^\]]*?&quot;url&quot;\s*:\s*&quot;([^&]+)&quot;',
     )

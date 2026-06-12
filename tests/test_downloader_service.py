@@ -791,6 +791,22 @@ def test_extract_instagram_public_media_urls_parses_unicode_escaped_direct_url()
     ]
 
 
+def test_extract_instagram_public_media_urls_parses_json_ld_video_keys():
+    webpage = """
+    <script type="application/ld+json">
+    {"@type":"VideoObject","contentUrl":"https:\\/\\/cdn.example\\/content?id=1\\u0026type=video"}
+    </script>
+    <script>
+    {&quot;videoUrl&quot;:&quot;https:\\/\\/cdn.example\\/video?id=2\\u0026type=video&quot;}
+    </script>
+    """
+
+    assert extract_instagram_public_media_urls(webpage) == [
+        "https://cdn.example/content?id=1&type=video",
+        "https://cdn.example/video?id=2&type=video",
+    ]
+
+
 def test_instagram_public_filename_uses_shortcode_and_safe_extension():
     assert (
         instagram_public_filename(
