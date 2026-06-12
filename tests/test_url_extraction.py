@@ -25,7 +25,9 @@ def test_extracts_instagram_reels_posts_and_tv_urls():
     references = InstagramService.extract_reel_urls(
         """
         https://www.instagram.com/reels/REELS123/?igsh=abc
+        https://www.instagram.com/creator/reel/USERREEL123/?utm_source=ig_web_copy_link
         https://www.instagram.com/p/POST456/?utm_source=ig_web_copy_link
+        https://www.instagram.com/p/EMBEDPOST/embed/
         https://www.instagram.com/tv/TV789/
         https://www.instagram.com/share/p/SHAREPOST/
         """
@@ -33,7 +35,9 @@ def test_extracts_instagram_reels_posts_and_tv_urls():
 
     assert [(reference.url, reference.shortcode, reference.is_share_url) for reference in references] == [
         ("https://www.instagram.com/reel/REELS123/", "REELS123", False),
+        ("https://www.instagram.com/reel/USERREEL123/", "USERREEL123", False),
         ("https://www.instagram.com/p/POST456/", "POST456", False),
+        ("https://www.instagram.com/p/EMBEDPOST/", "EMBEDPOST", False),
         ("https://www.instagram.com/tv/TV789/", "TV789", False),
         ("https://www.instagram.com/share/p/SHAREPOST/", "SHAREPOST", True),
     ]
@@ -90,6 +94,7 @@ def test_extracts_additional_supported_social_video_url_shapes():
         tiktok-embed https://www.tiktok.com/embed/7253412088251534596
         tiktok-embed-v2 https://www.tiktok.com/embed/v2/7253412088251534597?lang=en
         instagram-share https://www.instagram.com/share/BA123xyz/?utm_source=ig
+        instagram-user https://www.instagram.com/creator/reel/USERREEL123/
         twitter-legacy https://twitter.com/statuses/1790637656616943991
         """
     )
@@ -103,6 +108,7 @@ def test_extracts_additional_supported_social_video_url_shapes():
         ("tiktok", "7253412088251534596", False),
         ("tiktok", "7253412088251534597", False),
         ("instagram", "BA123xyz", True),
+        ("instagram", "USERREEL123", False),
         ("x", "1790637656616943991", False),
     ]
     assert references[0].url == "https://www.youtube.com/clip/UgkxClip123"
@@ -111,6 +117,7 @@ def test_extracts_additional_supported_social_video_url_shapes():
     assert references[3].url == "https://www.tiktok.com/@_/video/7253412088251534594"
     assert references[4].url == "https://m.tiktok.com/v/7253412088251534595"
     assert references[5].url == "https://www.tiktok.com/embed/7253412088251534596"
-    assert references[6].url == "https://www.tiktok.com/embed/v2/7253412088251534597"
+    assert references[6].url == "https://www.tiktok.com/embed/7253412088251534597"
     assert references[7].url == "https://www.instagram.com/share/BA123xyz/"
-    assert references[8].url == "https://x.com/i/status/1790637656616943991"
+    assert references[8].url == "https://www.instagram.com/reel/USERREEL123/"
+    assert references[9].url == "https://x.com/i/status/1790637656616943991"

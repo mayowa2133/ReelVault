@@ -66,18 +66,12 @@ def normalize_instagram_url(raw_url: str) -> ReelReference | None:
         return None
 
     parts = [unquote(part) for part in parsed.path.split("/") if part]
-    media_kind = parts[0].lower() if parts else ""
     canonical_media_kinds = {
         "reel": "reel",
         "reels": "reel",
         "p": "p",
         "tv": "tv",
     }
-    if len(parts) >= 2 and media_kind in canonical_media_kinds:
-        shortcode = parts[1]
-        normalized = f"https://www.instagram.com/{canonical_media_kinds[media_kind]}/{quote(shortcode)}/"
-        return ReelReference(url=normalized, raw_url=raw_url, shortcode=shortcode, provider="instagram")
-
     if len(parts) >= 3 and parts[0].lower() == "share" and parts[1].lower() in {"reel", "p", "tv"}:
         media_kind = parts[1].lower()
         share_token = parts[2]
@@ -100,6 +94,20 @@ def normalize_instagram_url(raw_url: str) -> ReelReference | None:
             is_share_url=True,
             provider="instagram",
         )
+
+    media_index = next(
+        (
+            index
+            for index, part in enumerate(parts[:2])
+            if part.lower() in canonical_media_kinds
+        ),
+        None,
+    )
+    if media_index is not None and len(parts) > media_index + 1:
+        media_kind = parts[media_index].lower()
+        shortcode = parts[media_index + 1]
+        normalized = f"https://www.instagram.com/{canonical_media_kinds[media_kind]}/{quote(shortcode)}/"
+        return ReelReference(url=normalized, raw_url=raw_url, shortcode=shortcode, provider="instagram")
 
     return None
 
@@ -185,7 +193,7 @@ def normalize_tiktok_url(raw_url: str) -> ReelReference | None:
     elif len(parts) >= 2 and parts[0].lower() == "embed":
         if len(parts) >= 3 and parts[1].lower() == "v2":
             shortcode = clean_tiktok_video_id(parts[2])
-            normalized_path = f"/embed/v2/{quote(shortcode)}"
+            normalized_path = f"/embed/{quote(shortcode)}"
         else:
             shortcode = clean_tiktok_video_id(parts[1])
             normalized_path = f"/embed/{quote(shortcode)}"

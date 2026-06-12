@@ -68,7 +68,7 @@ def test_normalize_diagnostic_returns_normalized_reference(tmp_path):
     body = response.json()
     assert body["ok"] is True
     assert body["provider"] == "tiktok"
-    assert body["url"] == "https://www.tiktok.com/embed/v2/7253412088251534597"
+    assert body["url"] == "https://www.tiktok.com/embed/7253412088251534597"
     assert body["raw_url"] == "https://www.tiktok.com/embed/v2/7253412088251534597?lang=en"
     assert body["shortcode"] == "7253412088251534597"
     assert body["is_share_url"] is False
