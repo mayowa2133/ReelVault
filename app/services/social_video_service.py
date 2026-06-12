@@ -18,13 +18,15 @@ SUPPORTED_SOCIAL_DOMAINS = (
 )
 
 SOCIAL_URL_PATTERN = re.compile(
-    r"(?:https?:)?//(?:[A-Za-z0-9-]+\.)?(?:instagram\.com|youtube(?:-nocookie|kids)?\.com|youtu\.be|tiktok\.com|x\.com|twitter\.com)/[^\s<>\"]+",
+    r"(?:instagram://media\?id=[^\s<>\"]+|(?:https?:)?//(?:[A-Za-z0-9-]+\.)?(?:instagram\.com|youtube(?:-nocookie|kids)?\.com|youtu\.be|tiktok\.com|x\.com|twitter\.com)/[^\s<>\"]+)",
     flags=re.IGNORECASE,
 )
 
 TRAILING_PUNCTUATION = ".,!?;:)']}>"
+INSTAGRAM_SHORTCODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
 SUPPORTED_URL_FEATURES = (
+    "instagram_deep_link_media_urls",
     "instagram_media_urls",
     "instagram_share_urls",
     "instagram_story_item_urls",
@@ -70,6 +72,8 @@ class SocialVideoService:
         host = parsed.netloc.lower()
         host = host.removeprefix("www.")
 
+        if parsed.scheme.lower() == "instagram":
+            return normalize_instagram_deep_link_url(raw_url)
         if (target_url := social_redirect_target_url(parsed, host)) and target_url != raw_url:
             return SocialVideoService.normalize_url(target_url)
 
@@ -170,6 +174,36 @@ def normalize_instagram_url(raw_url: str) -> ReelReference | None:
         return ReelReference(url=normalized, raw_url=raw_url, shortcode=shortcode, provider="instagram")
 
     return None
+
+
+def normalize_instagram_deep_link_url(raw_url: str) -> ReelReference | None:
+    parsed = urlsplit(raw_url)
+    if parsed.scheme.lower() != "instagram" or parsed.netloc.lower() != "media":
+        return None
+
+    media_id = first_query_value(parse_qs(parsed.query), "id")
+    shortcode = instagram_media_id_to_shortcode(media_id)
+    if not shortcode:
+        return None
+
+    normalized = f"https://www.instagram.com/tv/{quote(shortcode)}/"
+    return ReelReference(url=normalized, raw_url=raw_url, shortcode=shortcode, provider="instagram")
+
+
+def instagram_media_id_to_shortcode(media_id: str | None) -> str | None:
+    pk_text = str(media_id or "").split("_", 1)[0]
+    if not pk_text.isdigit():
+        return None
+
+    pk = int(pk_text)
+    if pk == 0:
+        return INSTAGRAM_SHORTCODE_CHARS[0]
+
+    shortcode = ""
+    while pk:
+        pk, index = divmod(pk, len(INSTAGRAM_SHORTCODE_CHARS))
+        shortcode = INSTAGRAM_SHORTCODE_CHARS[index] + shortcode
+    return shortcode
 
 
 def normalize_youtube_url(raw_url: str) -> ReelReference | None:

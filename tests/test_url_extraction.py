@@ -66,6 +66,25 @@ def test_extracts_instagram_story_item_urls():
     ]
 
 
+def test_extracts_instagram_media_deep_links():
+    references = SocialVideoService.extract_supported_urls(
+        "Open instagram://media?id=482584233761418119_2815873 from a shared app link."
+    )
+
+    assert [(reference.url, reference.shortcode, reference.provider) for reference in references] == [
+        ("https://www.instagram.com/tv/aye83DjauH/", "aye83DjauH", "instagram"),
+    ]
+
+
+def test_normalizes_instagram_media_deep_link():
+    reference = SocialVideoService.normalize_url("instagram://media?id=482584233761418119")
+
+    assert reference is not None
+    assert reference.provider == "instagram"
+    assert reference.shortcode == "aye83DjauH"
+    assert reference.url == "https://www.instagram.com/tv/aye83DjauH/"
+
+
 def test_unwraps_supported_social_redirect_urls():
     references = SocialVideoService.extract_supported_urls(
         """
