@@ -154,6 +154,38 @@ YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES = (
         format_selector=YOUTUBE_FALLBACK_FORMAT,
     ),
     YoutubeNoAuthFallbackStrategy(
+        name="web_creator_no_webpage_configs",
+        youtube_args={
+            "player_client": ["web_creator"],
+            "player_skip": ["webpage", "configs"],
+        },
+        format_selector=YOUTUBE_FALLBACK_FORMAT,
+    ),
+    YoutubeNoAuthFallbackStrategy(
+        name="web_music_no_webpage_configs",
+        youtube_args={
+            "player_client": ["web_music"],
+            "player_skip": ["webpage", "configs"],
+        },
+        format_selector=YOUTUBE_FALLBACK_FORMAT,
+    ),
+    YoutubeNoAuthFallbackStrategy(
+        name="tv_simply_no_webpage_configs",
+        youtube_args={
+            "player_client": ["tv_simply"],
+            "player_skip": ["webpage", "configs"],
+        },
+        format_selector=YOUTUBE_FALLBACK_FORMAT,
+    ),
+    YoutubeNoAuthFallbackStrategy(
+        name="tv_downgraded_no_webpage_configs",
+        youtube_args={
+            "player_client": ["tv_downgraded"],
+            "player_skip": ["webpage", "configs"],
+        },
+        format_selector=YOUTUBE_FALLBACK_FORMAT,
+    ),
+    YoutubeNoAuthFallbackStrategy(
         name="web_with_configured_po_token",
         youtube_args={
             "player_client": ["web", "default"],

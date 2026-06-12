@@ -406,7 +406,7 @@ def test_youtube_embedded_fallback_uses_explicit_client_and_embed_url(tmp_path):
     )
 
 
-def test_youtube_tv_and_android_vr_fallbacks_use_valid_clients(tmp_path):
+def test_youtube_named_client_fallbacks_use_valid_clients(tmp_path):
     service = DownloaderService(Settings())
     options = service._yt_dlp_options(str(tmp_path / "%(id)s.%(ext)s"), tmp_path)
 
@@ -415,12 +415,24 @@ def test_youtube_tv_and_android_vr_fallbacks_use_valid_clients(tmp_path):
             "player_client"
         ]
         for strategy in YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES
-        if strategy.name in {"tv_no_webpage_configs", "android_vr_no_webpage_configs"}
+        if strategy.name
+        in {
+            "tv_no_webpage_configs",
+            "android_vr_no_webpage_configs",
+            "web_creator_no_webpage_configs",
+            "web_music_no_webpage_configs",
+            "tv_simply_no_webpage_configs",
+            "tv_downgraded_no_webpage_configs",
+        }
     }
 
     assert clients == {
         "tv_no_webpage_configs": ["tv"],
         "android_vr_no_webpage_configs": ["android_vr"],
+        "web_creator_no_webpage_configs": ["web_creator"],
+        "web_music_no_webpage_configs": ["web_music"],
+        "tv_simply_no_webpage_configs": ["tv_simply"],
+        "tv_downgraded_no_webpage_configs": ["tv_downgraded"],
     }
 
 
