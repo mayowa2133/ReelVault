@@ -118,6 +118,7 @@ def test_extracts_additional_supported_social_video_url_shapes():
         """
         clip https://www.youtube.com/clip/UgkxClip123?si=tracking
         old-embed https://www.youtube.com/v/BaW_jenozKc?version=3
+        nocookie https://www.youtube-nocookie.com/embed/NOCOOKIE123?rel=0
         attribution https://www.youtube.com/attribution_link?u=%2Fwatch%3Fv%3DATTR123%26feature%3Dshare
         source-shorts https://www.youtube.com/source/SRC12345678/shorts?feature=share
         tiktok-share https://www.tiktok.com/share/video/7253412088251534594/?region=US
@@ -133,6 +134,7 @@ def test_extracts_additional_supported_social_video_url_shapes():
     assert [(reference.provider, reference.shortcode, reference.is_share_url) for reference in references] == [
         ("youtube", "UgkxClip123", False),
         ("youtube", "BaW_jenozKc", False),
+        ("youtube", "NOCOOKIE123", False),
         ("youtube", "ATTR123", False),
         ("youtube", "SRC12345678", False),
         ("tiktok", "7253412088251534594", False),
@@ -145,12 +147,13 @@ def test_extracts_additional_supported_social_video_url_shapes():
     ]
     assert references[0].url == "https://www.youtube.com/clip/UgkxClip123"
     assert references[1].url == "https://www.youtube.com/embed/BaW_jenozKc"
-    assert references[2].url == "https://www.youtube.com/watch?v=ATTR123"
-    assert references[3].url == "https://www.youtube.com/shorts/SRC12345678"
-    assert references[4].url == "https://www.tiktok.com/@_/video/7253412088251534594"
-    assert references[5].url == "https://m.tiktok.com/v/7253412088251534595"
-    assert references[6].url == "https://www.tiktok.com/embed/7253412088251534596"
-    assert references[7].url == "https://www.tiktok.com/embed/7253412088251534597"
-    assert references[8].url == "https://www.instagram.com/share/BA123xyz/"
-    assert references[9].url == "https://www.instagram.com/reel/USERREEL123/"
-    assert references[10].url == "https://x.com/i/status/1790637656616943991"
+    assert references[2].url == "https://www.youtube.com/embed/NOCOOKIE123"
+    assert references[3].url == "https://www.youtube.com/watch?v=ATTR123"
+    assert references[4].url == "https://www.youtube.com/shorts/SRC12345678"
+    assert references[5].url == "https://www.tiktok.com/@_/video/7253412088251534594"
+    assert references[6].url == "https://m.tiktok.com/v/7253412088251534595"
+    assert references[7].url == "https://www.tiktok.com/embed/7253412088251534596"
+    assert references[8].url == "https://www.tiktok.com/embed/7253412088251534597"
+    assert references[9].url == "https://www.instagram.com/share/BA123xyz/"
+    assert references[10].url == "https://www.instagram.com/reel/USERREEL123/"
+    assert references[11].url == "https://x.com/i/status/1790637656616943991"

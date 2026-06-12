@@ -9,6 +9,7 @@ from app.models.schemas import ReelReference
 SUPPORTED_SOCIAL_DOMAINS = (
     "instagram.com",
     "youtube.com",
+    "youtube-nocookie.com",
     "youtu.be",
     "tiktok.com",
     "x.com",
@@ -16,7 +17,7 @@ SUPPORTED_SOCIAL_DOMAINS = (
 )
 
 SOCIAL_URL_PATTERN = re.compile(
-    r"https?://(?:[A-Za-z0-9-]+\.)?(?:instagram\.com|youtube\.com|youtu\.be|tiktok\.com|x\.com|twitter\.com)/[^\s<>\"]+",
+    r"https?://(?:[A-Za-z0-9-]+\.)?(?:instagram\.com|youtube(?:-nocookie)?\.com|youtu\.be|tiktok\.com|x\.com|twitter\.com)/[^\s<>\"]+",
     flags=re.IGNORECASE,
 )
 
@@ -33,8 +34,10 @@ SUPPORTED_URL_FEATURES = (
     "x_twitter_status_urls",
     "youtube_attribution_urls",
     "youtube_clip_urls",
+    "youtube_nocookie_embed_urls",
     "youtube_redirect_urls",
     "youtube_shorts_live_embed_urls",
+    "youtube_source_shorts_urls",
 )
 
 
@@ -68,7 +71,7 @@ class SocialVideoService:
 
         if host == "instagram.com":
             return normalize_instagram_url(raw_url)
-        if host in {"youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}:
+        if host in {"youtube.com", "m.youtube.com", "music.youtube.com", "youtube-nocookie.com", "youtu.be"}:
             return normalize_youtube_url(raw_url)
         if host in {"tiktok.com", "m.tiktok.com", "vm.tiktok.com", "vt.tiktok.com"}:
             return normalize_tiktok_url(raw_url)
@@ -169,7 +172,7 @@ def normalize_youtube_url(raw_url: str) -> ReelReference | None:
             provider="youtube",
         )
 
-    if host not in {"youtube.com", "m.youtube.com", "music.youtube.com"}:
+    if host not in {"youtube.com", "m.youtube.com", "music.youtube.com", "youtube-nocookie.com"}:
         return None
 
     parts = [unquote(part) for part in parsed.path.split("/") if part]
