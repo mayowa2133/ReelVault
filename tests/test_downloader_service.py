@@ -640,6 +640,24 @@ def test_extract_tiktok_public_media_urls_parses_unicode_escaped_direct_url():
     ]
 
 
+def test_extract_tiktok_public_media_urls_parses_meta_and_json_ld_video_keys():
+    webpage = """
+    <meta property="og:video" content="https://v16-webapp-prime.tiktok.com/video/tos/useast2a/meta?x=1&amp;y=2">
+    <script type="application/ld+json">
+    {"@type":"VideoObject","contentUrl":"https:\\/\\/v16-webapp-prime.tiktok.com\\/video\\/tos\\/useast2a\\/content?id=1\\u0026type=video"}
+    </script>
+    <script>
+    {&quot;videoUrl&quot;:&quot;https:\\/\\/v16-webapp-prime.tiktok.com\\/video\\/tos\\/useast2a\\/video?id=2\\u0026type=video&quot;}
+    </script>
+    """
+
+    assert extract_tiktok_public_media_urls(webpage) == [
+        "https://v16-webapp-prime.tiktok.com/video/tos/useast2a/meta?x=1&y=2",
+        "https://v16-webapp-prime.tiktok.com/video/tos/useast2a/content?id=1&type=video",
+        "https://v16-webapp-prime.tiktok.com/video/tos/useast2a/video?id=2&type=video",
+    ]
+
+
 def test_tiktok_public_filename_uses_video_id_and_safe_extension():
     assert (
         tiktok_public_filename(

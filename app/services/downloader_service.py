@@ -1440,6 +1440,19 @@ def tiktok_public_headers(user_agent: str) -> dict[str, str]:
 
 def extract_tiktok_public_media_urls(webpage: str) -> list[str]:
     candidates: list[str] = []
+    for meta_name in ("og:video", "og:video:secure_url", "twitter:player:stream"):
+        if meta_content := extract_html_meta_content(webpage, (meta_name,)):
+            candidates.append(meta_content)
+
+    patterns = (
+        r'"videoUrl"\s*:\s*"([^"]+)"',
+        r'"contentUrl"\s*:\s*"([^"]+)"',
+        r'&quot;videoUrl&quot;\s*:\s*&quot;([^&]+)&quot;',
+        r'&quot;contentUrl&quot;\s*:\s*&quot;([^&]+)&quot;',
+    )
+    for pattern in patterns:
+        candidates.extend(match.group(1) for match in re.finditer(pattern, webpage))
+
     for data in extract_tiktok_public_json_blocks(webpage):
         collect_tiktok_video_urls(data, candidates)
 
