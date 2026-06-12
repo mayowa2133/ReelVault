@@ -39,6 +39,7 @@ SUPPORTED_URL_FEATURES = (
     "x_twitter_status_urls",
     "youtube_attribution_urls",
     "youtube_clip_urls",
+    "youtube_fragment_urls",
     "youtube_legacy_watch_query_urls",
     "youtube_nocookie_embed_urls",
     "youtube_non_video_embed_urls_ignored",
@@ -229,6 +230,11 @@ def normalize_youtube_url(raw_url: str) -> ReelReference | None:
     if host not in {"youtube.com", "m.youtube.com", "music.youtube.com", "youtube-nocookie.com", "youtubekids.com"}:
         return None
 
+    if target_url := youtube_fragment_target_url(parsed):
+        return normalize_youtube_url(target_url)
+    if "v" not in query:
+        query = youtube_fragment_query(parsed.fragment) or query
+
     parts = [unquote(part) for part in parsed.path.split("/") if part]
     video_id = None
     normalized_path = parsed.path
@@ -274,6 +280,22 @@ def youtube_attribution_target_url(query: dict[str, list[str]]) -> str | None:
         return None
     target = unquote(target)
     return urljoin("https://www.youtube.com", target)
+
+
+def youtube_fragment_target_url(parsed) -> str | None:
+    fragment = unquote(parsed.fragment or "").lstrip("!")
+    if not fragment.startswith("/"):
+        return None
+    return urljoin(f"{parsed.scheme or 'https'}://{parsed.netloc}", fragment)
+
+
+def youtube_fragment_query(fragment: str) -> dict[str, list[str]]:
+    fragment = unquote(fragment or "").lstrip("!")
+    if not fragment:
+        return {}
+    if "?" in fragment:
+        fragment = fragment.split("?", 1)[1]
+    return parse_qs(fragment)
 
 
 def normalize_tiktok_url(raw_url: str) -> ReelReference | None:

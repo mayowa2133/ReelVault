@@ -115,6 +115,20 @@ def test_unwraps_youtube_url_query_redirect_targets():
     ]
 
 
+def test_extracts_youtube_fragment_video_urls():
+    references = SocialVideoService.extract_supported_urls(
+        """
+        hashbang https://www.youtube.com/watch#!v=HASHBANG123
+        redirect-fragment https://www.youtube.com/#/watch?v=FRAGWATCH12
+        """
+    )
+
+    assert [(reference.shortcode, reference.url) for reference in references] == [
+        ("HASHBANG123", "https://www.youtube.com/watch?v=HASHBANG123"),
+        ("FRAGWATCH12", "https://www.youtube.com/watch?v=FRAGWATCH12"),
+    ]
+
+
 def test_extracts_protocol_relative_social_video_urls():
     references = SocialVideoService.extract_supported_urls(
         """
