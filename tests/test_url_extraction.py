@@ -57,6 +57,22 @@ def test_extracts_instagram_story_item_urls():
     ]
 
 
+def test_unwraps_supported_social_redirect_urls():
+    references = SocialVideoService.extract_supported_urls(
+        """
+        youtube https://www.youtube.com/redirect?event=video_description&q=https%3A%2F%2Fyoutu.be%2FREDIR123%3Fsi%3Dabc
+        instagram https://l.instagram.com/?u=https%3A%2F%2Fwww.instagram.com%2Freel%2FIGLINK123%2F&e=abc
+        tiktok https://www.tiktok.com/link/v2?target=https%3A%2F%2Fwww.tiktok.com%2F%40creator%2Fvideo%2F7253412088251534598
+        """
+    )
+
+    assert [(reference.provider, reference.shortcode, reference.url) for reference in references] == [
+        ("youtube", "REDIR123", "https://youtu.be/REDIR123"),
+        ("instagram", "IGLINK123", "https://www.instagram.com/reel/IGLINK123/"),
+        ("tiktok", "7253412088251534598", "https://www.tiktok.com/@creator/video/7253412088251534598"),
+    ]
+
+
 def test_extracts_multiple_unique_reel_urls():
     text = """
     First: https://instagram.com/reel/ONE123/

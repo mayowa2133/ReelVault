@@ -48,6 +48,9 @@ class SocialVideoService:
         host = parsed.netloc.lower()
         host = host.removeprefix("www.")
 
+        if (target_url := social_redirect_target_url(parsed, host)) and target_url != raw_url:
+            return SocialVideoService.normalize_url(target_url)
+
         if host == "instagram.com":
             return normalize_instagram_url(raw_url)
         if host in {"youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}:
@@ -57,6 +60,23 @@ class SocialVideoService:
         if host in {"x.com", "twitter.com", "mobile.twitter.com"}:
             return normalize_x_url(raw_url)
         return None
+
+
+def social_redirect_target_url(parsed, host: str) -> str | None:
+    query = parse_qs(parsed.query)
+    parts = [part.lower() for part in parsed.path.split("/") if part]
+    target = None
+
+    if host in {"l.instagram.com", "lm.instagram.com"}:
+        target = first_query_value(query, "u")
+    elif host in {"youtube.com", "m.youtube.com"} and parts[:1] == ["redirect"]:
+        target = first_query_value(query, "q") or first_query_value(query, "u")
+    elif host == "tiktok.com" and parts[:2] == ["link", "v2"]:
+        target = first_query_value(query, "target")
+
+    if not target:
+        return None
+    return urljoin(f"{parsed.scheme or 'https'}://{parsed.netloc}", unquote(target))
 
 
 def normalize_instagram_url(raw_url: str) -> ReelReference | None:
