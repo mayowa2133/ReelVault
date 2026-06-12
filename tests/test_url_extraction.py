@@ -87,6 +87,8 @@ def test_extracts_additional_supported_social_video_url_shapes():
         attribution https://www.youtube.com/attribution_link?u=%2Fwatch%3Fv%3DATTR123%26feature%3Dshare
         tiktok-share https://www.tiktok.com/share/video/7253412088251534594/?region=US
         tiktok-mobile https://m.tiktok.com/v/7253412088251534595.html
+        tiktok-embed https://www.tiktok.com/embed/7253412088251534596
+        tiktok-embed-v2 https://www.tiktok.com/embed/v2/7253412088251534597?lang=en
         instagram-share https://www.instagram.com/share/BA123xyz/?utm_source=ig
         twitter-legacy https://twitter.com/statuses/1790637656616943991
         """
@@ -98,6 +100,8 @@ def test_extracts_additional_supported_social_video_url_shapes():
         ("youtube", "ATTR123", False),
         ("tiktok", "7253412088251534594", False),
         ("tiktok", "7253412088251534595", False),
+        ("tiktok", "7253412088251534596", False),
+        ("tiktok", "7253412088251534597", False),
         ("instagram", "BA123xyz", True),
         ("x", "1790637656616943991", False),
     ]
@@ -106,5 +110,7 @@ def test_extracts_additional_supported_social_video_url_shapes():
     assert references[2].url == "https://www.youtube.com/watch?v=ATTR123"
     assert references[3].url == "https://www.tiktok.com/@_/video/7253412088251534594"
     assert references[4].url == "https://m.tiktok.com/v/7253412088251534595"
-    assert references[5].url == "https://www.instagram.com/share/BA123xyz/"
-    assert references[6].url == "https://x.com/i/status/1790637656616943991"
+    assert references[5].url == "https://www.tiktok.com/embed/7253412088251534596"
+    assert references[6].url == "https://www.tiktok.com/embed/v2/7253412088251534597"
+    assert references[7].url == "https://www.instagram.com/share/BA123xyz/"
+    assert references[8].url == "https://x.com/i/status/1790637656616943991"

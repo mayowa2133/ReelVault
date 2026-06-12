@@ -182,6 +182,13 @@ def normalize_tiktok_url(raw_url: str) -> ReelReference | None:
     elif len(parts) >= 2 and parts[0].lower() in {"t", "v"}:
         shortcode = clean_tiktok_video_id(parts[1])
         normalized_path = f"/{parts[0].lower()}/{quote(shortcode)}"
+    elif len(parts) >= 2 and parts[0].lower() == "embed":
+        if len(parts) >= 3 and parts[1].lower() == "v2":
+            shortcode = clean_tiktok_video_id(parts[2])
+            normalized_path = f"/embed/v2/{quote(shortcode)}"
+        else:
+            shortcode = clean_tiktok_video_id(parts[1])
+            normalized_path = f"/embed/{quote(shortcode)}"
     elif len(parts) >= 3 and parts[0].lower() == "share" and parts[1].lower() == "video":
         shortcode = clean_tiktok_video_id(parts[2])
         normalized_path = f"/@_/video/{quote(shortcode)}"

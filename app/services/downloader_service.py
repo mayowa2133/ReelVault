@@ -1426,6 +1426,7 @@ def tiktok_public_page_urls(url: str, timeout_seconds: int, user_agent: str) -> 
     video_id = tiktok_public_id(resolved_url or url)
     if video_id != "tiktok_media":
         page_urls.append(("tiktok_public_embed_url", f"https://www.tiktok.com/embed/{quote(video_id, safe='')}"))
+        page_urls.append(("tiktok_public_embed_v2_url", f"https://www.tiktok.com/embed/v2/{quote(video_id, safe='')}"))
 
     return dedupe_named_urls(page_urls)
 
@@ -1567,6 +1568,8 @@ def tiktok_public_id(url: str) -> str:
     host = parsed.netloc.lower().removeprefix("www.")
     parts = [part for part in parsed.path.split("/") if part]
     if len(parts) >= 3 and parts[0].startswith("@") and parts[1].lower() == "video":
+        return safe_filename_id(clean_tiktok_video_id(parts[2]))
+    if len(parts) >= 3 and parts[0].lower() == "embed" and parts[1].lower() == "v2":
         return safe_filename_id(clean_tiktok_video_id(parts[2]))
     if len(parts) >= 2 and parts[0].lower() == "embed":
         return safe_filename_id(clean_tiktok_video_id(parts[1]))

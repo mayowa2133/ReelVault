@@ -28,6 +28,7 @@ from app.services.downloader_service import (
     should_retry_youtube_without_webpage,
     tiktok_public_id,
     tiktok_public_filename,
+    tiktok_public_page_urls,
     download_failure_guidance,
     downloader_runtime_info,
     summarize_attempt_errors,
@@ -694,8 +695,22 @@ def test_tiktok_public_filename_uses_video_id_and_safe_extension():
     )
 
 
+def test_tiktok_public_page_urls_include_embed_variants():
+    assert tiktok_public_page_urls(
+        "https://www.tiktok.com/@creator/video/7253412088251534594",
+        timeout_seconds=3,
+        user_agent="UA",
+    ) == [
+        ("tiktok_public_original_url", "https://www.tiktok.com/@creator/video/7253412088251534594"),
+        ("tiktok_public_embed_url", "https://www.tiktok.com/embed/7253412088251534594"),
+        ("tiktok_public_embed_v2_url", "https://www.tiktok.com/embed/v2/7253412088251534594"),
+    ]
+
+
 def test_tiktok_public_id_strips_mobile_html_suffix():
     assert tiktok_public_id("https://m.tiktok.com/v/7253412088251534594.html") == "7253412088251534594"
+    assert tiktok_public_id("https://www.tiktok.com/embed/7253412088251534594") == "7253412088251534594"
+    assert tiktok_public_id("https://www.tiktok.com/embed/v2/7253412088251534594") == "7253412088251534594"
     assert (
         tiktok_public_filename(
             "https://m.tiktok.com/v/7253412088251534594.html",
