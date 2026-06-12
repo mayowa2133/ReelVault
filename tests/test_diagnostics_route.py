@@ -35,6 +35,46 @@ def test_download_diagnostic_rejects_unsupported_url(tmp_path):
     assert response.status_code == 400
 
 
+def test_normalize_diagnostic_rejects_missing_secret(tmp_path):
+    client = build_client(Settings(task_request_secret="expected-secret", temp_dir=tmp_path))
+
+    response = client.post("/diagnostics/normalize", json={"url": "https://www.youtube.com/watch?v=jNQXAC9IVRw"})
+
+    assert response.status_code == 401
+
+
+def test_normalize_diagnostic_rejects_unsupported_url(tmp_path):
+    client = build_client(Settings(task_request_secret="expected-secret", temp_dir=tmp_path))
+
+    response = client.post(
+        "/diagnostics/normalize",
+        json={"url": "https://example.com/video"},
+        headers={"X-ReelVault-Task-Secret": "expected-secret"},
+    )
+
+    assert response.status_code == 400
+
+
+def test_normalize_diagnostic_returns_normalized_reference(tmp_path):
+    client = build_client(Settings(task_request_secret="expected-secret", temp_dir=tmp_path))
+
+    response = client.post(
+        "/diagnostics/normalize",
+        json={"url": "https://www.tiktok.com/embed/v2/7253412088251534597?lang=en"},
+        headers={"X-ReelVault-Task-Secret": "expected-secret"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["provider"] == "tiktok"
+    assert body["url"] == "https://www.tiktok.com/embed/v2/7253412088251534597"
+    assert body["raw_url"] == "https://www.tiktok.com/embed/v2/7253412088251534597?lang=en"
+    assert body["shortcode"] == "7253412088251534597"
+    assert body["is_share_url"] is False
+    assert body["downloader"]["yt_dlp_available"] is True
+
+
 def test_download_diagnostic_calls_downloader(tmp_path, monkeypatch):
     output_file = tmp_path / "video.mp4"
 

@@ -21,6 +21,10 @@ class DownloadDiagnosticPayload(BaseModel):
     debug_log_max_chars: int = Field(default=20000, ge=1000, le=80000)
 
 
+class NormalizeDiagnosticPayload(BaseModel):
+    url: str = Field(min_length=1)
+
+
 def require_task_secret(
     x_reelvault_task_secret: str | None,
     settings: Settings,
@@ -83,6 +87,29 @@ def download_diagnostic(
         }
         append_debug_log(response, debug_log, payload.debug_log_max_chars)
         return response
+
+
+@router.post("/diagnostics/normalize")
+def normalize_diagnostic(
+    payload: NormalizeDiagnosticPayload,
+    x_reelvault_task_secret: str | None = Header(default=None, alias=TASK_SECRET_HEADER),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    require_task_secret(x_reelvault_task_secret, settings)
+
+    reel = SocialVideoService.normalize_url(payload.url)
+    if not reel:
+        raise HTTPException(status_code=400, detail="Unsupported social video URL")
+
+    return {
+        "ok": True,
+        "provider": reel.provider,
+        "url": reel.url,
+        "raw_url": reel.raw_url,
+        "shortcode": reel.shortcode,
+        "is_share_url": reel.is_share_url,
+        "downloader": downloader_runtime_info(settings),
+    }
 
 
 def append_debug_log(response: dict[str, object], debug_log: list[str] | None, max_chars: int) -> None:
