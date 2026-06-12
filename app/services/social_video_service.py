@@ -8,6 +8,7 @@ from app.models.schemas import ReelReference
 
 SUPPORTED_SOCIAL_DOMAINS = (
     "cleanvideosearch.com",
+    "consent.youtube.com",
     "deturl.com",
     "hooktube.com",
     "instagram.com",
@@ -50,6 +51,7 @@ SUPPORTED_URL_FEATURES = (
     "x_twitter_status_urls",
     "youtube_attribution_urls",
     "youtube_clip_urls",
+    "youtube_consent_redirect_urls",
     "youtube_fragment_urls",
     "youtube_googleapis_urls",
     "youtube_legacy_watch_query_urls",
@@ -132,6 +134,8 @@ def social_redirect_target_url(parsed, host: str) -> str | None:
 
     if host in {"l.instagram.com", "lm.instagram.com"}:
         target = first_query_value(query, "u")
+    elif host == "consent.youtube.com" and parts[:1] == ["m"]:
+        target = first_query_value(query, "continue")
     elif host in {"youtube.com", "m.youtube.com"} and parts[:1] == ["redirect"]:
         target = first_query_value(query, "q") or first_query_value(query, "u") or first_query_value(query, "url")
     elif host == "tiktok.com" and parts[:2] == ["link", "v2"]:

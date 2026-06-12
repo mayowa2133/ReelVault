@@ -131,6 +131,16 @@ def test_unwraps_youtube_url_query_redirect_targets():
     ]
 
 
+def test_unwraps_youtube_consent_redirect_targets():
+    references = SocialVideoService.extract_supported_urls(
+        "Consent https://consent.youtube.com/m?continue=https%3A%2F%2Fwww.youtube.com%2Flive%2FCONSENT1234A%3Fcbrd%3D1&gl=US&m=0&pc=yt"
+    )
+
+    assert [(reference.shortcode, reference.url) for reference in references] == [
+        ("CONSENT1234A", "https://www.youtube.com/live/CONSENT1234A"),
+    ]
+
+
 def test_extracts_youtube_fragment_video_urls():
     references = SocialVideoService.extract_supported_urls(
         """
