@@ -371,7 +371,26 @@ def test_youtube_visitor_data_fallback_uses_configured_visitor_data(tmp_path):
         "player_skip": ["webpage", "configs"],
         "visitor_data": ["VISITOR123"],
     }
+    assert fallback["extractor_args"]["youtubetab"] == {"skip": ["webpage"]}
     assert "cookiefile" not in fallback
+
+
+def test_youtube_visitor_data_fallback_preserves_custom_youtubetab_args(tmp_path):
+    service = DownloaderService(
+        Settings(
+            youtube_visitor_data="VISITOR123",
+            social_extractor_args_json='{"youtubetab":{"skip":["authcheck"],"lang":["en"]}}',
+        )
+    )
+    options = service._yt_dlp_options(str(tmp_path / "%(id)s.%(ext)s"), tmp_path)
+    strategy = next(item for item in YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES if item.name == "default_clients_with_visitor_data")
+
+    fallback = service._youtube_no_auth_fallback_options(options, strategy, service._youtube_visitor_data())
+
+    assert fallback["extractor_args"]["youtubetab"] == {
+        "skip": ["authcheck", "webpage"],
+        "lang": ["en"],
+    }
 
 
 def test_youtube_po_token_fallback_uses_configured_token(tmp_path):
@@ -387,6 +406,7 @@ def test_youtube_po_token_fallback_uses_configured_token(tmp_path):
         "visitor_data": ["VISITOR123"],
         "po_token": ["web.gvs+TOKEN123"],
     }
+    assert fallback["extractor_args"]["youtubetab"] == {"skip": ["webpage"]}
     assert "cookiefile" not in fallback
 
 

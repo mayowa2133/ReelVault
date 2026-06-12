@@ -835,6 +835,9 @@ class DownloaderService:
         youtube_args.update(strategy.youtube_args)
         if strategy.use_visitor_data and visitor_data:
             youtube_args["visitor_data"] = [visitor_data]
+            youtubetab_args = dict(extractor_args.get("youtubetab") or {})
+            youtubetab_args["skip"] = append_unique_string(youtubetab_args.get("skip"), "webpage")
+            extractor_args["youtubetab"] = youtubetab_args
         if strategy.use_po_token and self.settings.youtube_po_token:
             youtube_args["po_token"] = [self.settings.youtube_po_token]
         extractor_args["youtube"] = youtube_args
@@ -1222,6 +1225,11 @@ def normalize_extractor_arg_values(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(item).strip() for item in value if str(item).strip()]
     return [str(value).strip()] if str(value).strip() else []
+
+
+def append_unique_string(values: Any, value: str) -> list[str]:
+    normalized = normalize_extractor_arg_values(values)
+    return normalized if value in normalized else [*normalized, value]
 
 
 def yt_dlp_impersonate_value(value: str) -> Any | None:
