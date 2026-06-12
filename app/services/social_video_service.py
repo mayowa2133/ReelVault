@@ -44,6 +44,7 @@ SUPPORTED_URL_FEATURES = (
     "youtube_nocookie_embed_urls",
     "youtube_non_video_embed_urls_ignored",
     "youtube_redirect_urls",
+    "youtube_semicolon_query_urls",
     "youtube_shorts_live_embed_urls",
     "youtube_source_shorts_urls",
 )
@@ -103,7 +104,7 @@ def ensure_url_scheme(raw_url: str) -> str:
 
 
 def social_redirect_target_url(parsed, host: str) -> str | None:
-    query = parse_qs(parsed.query)
+    query = parse_query_values(parsed.query)
     parts = [part.lower() for part in parsed.path.split("/") if part]
     target = None
 
@@ -186,7 +187,7 @@ def normalize_instagram_deep_link_url(raw_url: str) -> ReelReference | None:
     if parsed.scheme.lower() != "instagram" or parsed.netloc.lower() != "media":
         return None
 
-    media_id = first_query_value(parse_qs(parsed.query), "id")
+    media_id = first_query_value(parse_query_values(parsed.query), "id")
     shortcode = instagram_media_id_to_shortcode(media_id)
     if not shortcode:
         return None
@@ -214,7 +215,7 @@ def instagram_media_id_to_shortcode(media_id: str | None) -> str | None:
 def normalize_youtube_url(raw_url: str) -> ReelReference | None:
     parsed = urlsplit(raw_url)
     host = parsed.netloc.lower().removeprefix("www.")
-    query = parse_qs(parsed.query)
+    query = parse_query_values(parsed.query)
 
     if host == "youtu.be":
         video_id = first_path_part(parsed.path)
@@ -295,7 +296,7 @@ def youtube_fragment_query(fragment: str) -> dict[str, list[str]]:
         return {}
     if "?" in fragment:
         fragment = fragment.split("?", 1)[1]
-    return parse_qs(fragment)
+    return parse_query_values(fragment)
 
 
 def normalize_tiktok_url(raw_url: str) -> ReelReference | None:
@@ -371,3 +372,7 @@ def first_path_part(path: str) -> str | None:
 def first_query_value(query: dict[str, list[str]], key: str) -> str | None:
     values = query.get(key) or []
     return values[0] if values and values[0] else None
+
+
+def parse_query_values(query: str) -> dict[str, list[str]]:
+    return parse_qs(query.replace(";", "&"))

@@ -129,6 +129,20 @@ def test_extracts_youtube_fragment_video_urls():
     ]
 
 
+def test_extracts_youtube_semicolon_query_urls():
+    references = SocialVideoService.extract_supported_urls(
+        """
+        direct https://www.youtube.com/watch?feature=share;v=SEMICOLON1A
+        redirect https://www.youtube.com/redirect?event=video_description;url=%2Fwatch%3Fv%3DSEMICOLON1B
+        """
+    )
+
+    assert [(reference.shortcode, reference.url) for reference in references] == [
+        ("SEMICOLON1A", "https://www.youtube.com/watch?v=SEMICOLON1A"),
+        ("SEMICOLON1B", "https://www.youtube.com/watch?v=SEMICOLON1B"),
+    ]
+
+
 def test_extracts_protocol_relative_social_video_urls():
     references = SocialVideoService.extract_supported_urls(
         """
