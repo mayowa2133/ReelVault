@@ -252,6 +252,8 @@ def normalize_youtube_url(raw_url: str) -> ReelReference | None:
     elif len(parts) >= 2 and parts[0].lower() in {"shorts", "live", "embed", "clip", "v", "e"}:
         video_id = parts[1]
         path_kind = {"v": "embed", "e": "embed"}.get(parts[0].lower(), parts[0].lower())
+        if path_kind == "embed" and video_id.lower() in {"videoseries", "live_stream"}:
+            return None
         normalized_path = f"/{path_kind}/{quote(video_id)}"
     else:
         return None

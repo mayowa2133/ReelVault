@@ -154,6 +154,17 @@ def test_ignores_instagram_reels_audio_pages():
     assert references == []
 
 
+def test_ignores_youtube_non_video_embed_urls():
+    references = SocialVideoService.extract_supported_urls(
+        """
+        playlist https://www.youtube.com/embed/videoseries?list=PL123
+        livestream https://www.youtube.com/embed/live_stream?channel=UC123
+        """
+    )
+
+    assert references == []
+
+
 def test_extracts_supported_social_video_urls():
     references = SocialVideoService.extract_supported_urls(
         """
