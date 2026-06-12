@@ -159,7 +159,7 @@ def youtube_video_id(url: str) -> str | None:
     host = parsed.netloc.lower().removeprefix("www.")
     if host == "youtu.be":
         return first_path_part(parsed.path)
-    if host not in {"youtube.com", "m.youtube.com", "music.youtube.com", "youtube-nocookie.com"}:
+    if host not in {"youtube.com", "m.youtube.com", "music.youtube.com", "youtube-nocookie.com", "youtubekids.com"}:
         return None
 
     query_id = first_query_value(parse_qs(parsed.query), "v")

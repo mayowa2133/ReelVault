@@ -18,6 +18,7 @@ def test_health_includes_downloader_runtime_info():
     ]
     assert "instagram_story_item_urls" in body["url_support"]["features"]
     assert "social_redirect_unwrapping" in body["url_support"]["features"]
+    assert "youtube_legacy_watch_query_urls" in body["url_support"]["features"]
     assert "youtube_nocookie_embed_urls" in body["url_support"]["features"]
     assert "youtube_redirect_urls" in body["url_support"]["features"]
     assert "youtube_source_shorts_urls" in body["url_support"]["features"]

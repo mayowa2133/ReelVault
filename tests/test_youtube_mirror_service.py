@@ -20,6 +20,9 @@ def test_parse_base_urls_splits_commas_newlines_and_dedupes():
 
 def test_youtube_video_id_handles_common_url_shapes():
     assert youtube_video_id("https://www.youtube.com/watch?v=jNQXAC9IVRw") == "jNQXAC9IVRw"
+    assert youtube_video_id("https://www.youtube.com/?v=jNQXAC9IVRw") == "jNQXAC9IVRw"
+    assert youtube_video_id("https://www.youtube.com/watch_popup?v=jNQXAC9IVRw") == "jNQXAC9IVRw"
+    assert youtube_video_id("https://www.youtubekids.com/watch?v=jNQXAC9IVRw") == "jNQXAC9IVRw"
     assert youtube_video_id("https://youtu.be/jNQXAC9IVRw") == "jNQXAC9IVRw"
     assert youtube_video_id("https://www.youtube-nocookie.com/embed/jNQXAC9IVRw?rel=0") == "jNQXAC9IVRw"
     assert youtube_video_id("https://www.youtube.com/shorts/XnjiprcNurg") == "XnjiprcNurg"

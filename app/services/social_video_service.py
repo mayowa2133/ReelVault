@@ -10,6 +10,7 @@ SUPPORTED_SOCIAL_DOMAINS = (
     "instagram.com",
     "youtube.com",
     "youtube-nocookie.com",
+    "youtubekids.com",
     "youtu.be",
     "tiktok.com",
     "x.com",
@@ -17,7 +18,7 @@ SUPPORTED_SOCIAL_DOMAINS = (
 )
 
 SOCIAL_URL_PATTERN = re.compile(
-    r"https?://(?:[A-Za-z0-9-]+\.)?(?:instagram\.com|youtube(?:-nocookie)?\.com|youtu\.be|tiktok\.com|x\.com|twitter\.com)/[^\s<>\"]+",
+    r"https?://(?:[A-Za-z0-9-]+\.)?(?:instagram\.com|youtube(?:-nocookie|kids)?\.com|youtu\.be|tiktok\.com|x\.com|twitter\.com)/[^\s<>\"]+",
     flags=re.IGNORECASE,
 )
 
@@ -34,6 +35,7 @@ SUPPORTED_URL_FEATURES = (
     "x_twitter_status_urls",
     "youtube_attribution_urls",
     "youtube_clip_urls",
+    "youtube_legacy_watch_query_urls",
     "youtube_nocookie_embed_urls",
     "youtube_redirect_urls",
     "youtube_shorts_live_embed_urls",
@@ -71,7 +73,14 @@ class SocialVideoService:
 
         if host == "instagram.com":
             return normalize_instagram_url(raw_url)
-        if host in {"youtube.com", "m.youtube.com", "music.youtube.com", "youtube-nocookie.com", "youtu.be"}:
+        if host in {
+            "youtube.com",
+            "m.youtube.com",
+            "music.youtube.com",
+            "youtube-nocookie.com",
+            "youtubekids.com",
+            "youtu.be",
+        }:
             return normalize_youtube_url(raw_url)
         if host in {"tiktok.com", "m.tiktok.com", "vm.tiktok.com", "vt.tiktok.com"}:
             return normalize_tiktok_url(raw_url)
@@ -172,7 +181,7 @@ def normalize_youtube_url(raw_url: str) -> ReelReference | None:
             provider="youtube",
         )
 
-    if host not in {"youtube.com", "m.youtube.com", "music.youtube.com", "youtube-nocookie.com"}:
+    if host not in {"youtube.com", "m.youtube.com", "music.youtube.com", "youtube-nocookie.com", "youtubekids.com"}:
         return None
 
     parts = [unquote(part) for part in parsed.path.split("/") if part]
@@ -185,7 +194,10 @@ def normalize_youtube_url(raw_url: str) -> ReelReference | None:
         if target_url:
             return normalize_youtube_url(target_url)
         return None
-    if parts and parts[0].lower() == "watch":
+    if not parts or (
+        len(parts) == 1
+        and parts[0].lower() in {"watch", "watch_popup", "watch.php", "movie", "movie_popup", "movie.php"}
+    ):
         video_id = first_query_value(query, "v")
         if not video_id:
             return None
