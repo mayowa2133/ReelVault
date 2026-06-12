@@ -370,7 +370,13 @@ For YouTube bot-check responses, ReelVault automatically tries a no-auth fallbac
 
 yt-dlp currently recommends PO Token provider plugins instead of manually copying PO tokens because YouTube can bind tokens to each video. The Docker image installs the pinned `bgutil-ytdlp-pot-provider` plugin and matching Deno provider by default, starts the local provider HTTP server on `127.0.0.1:4416`, sets `YOUTUBE_FETCH_POT_POLICY=always`, and points yt-dlp at that provider with `YOUTUBE_POT_BGUTIL_BASE_URL`. This is not account authentication, but it does add third-party code and can still fail when YouTube blocks the Cloud Run IP or changes attestation.
 
-For TikTok failures, ReelVault resolves short `vm.tiktok.com`, `vt.tiktok.com`, `/t/...`, and `/v/...` links to their canonical video URL before retrying, retries yt-dlp with multiple TikTok mobile API app ID and region profiles, then makes a final anonymous public-page pass that downloads direct video media from TikTok's public `SIGI_STATE`, `__UNIVERSAL_DATA_FOR_REHYDRATION__`, `playAddr`, `downloadAddr`, and `bitrateInfo.PlayAddr.UrlList` structures when exposed. For Instagram failures, ReelVault accepts `/reel/`, `/reels/`, `/p/`, `/tv/`, and matching share URLs, retries common URL/embed variants, resolves `instagram.com/share/...` redirects before retrying, then makes a final anonymous public-page pass that downloads direct `og:video` or embedded `video_url` media if Instagram exposes one in the public HTML. For X/Twitter failures, ReelVault retries equivalent `x.com`, `twitter.com`, `i/web/status`, and legacy `/statuses/` URL shapes, then retries yt-dlp's legacy Twitter API selector. These are anonymous public-media fallbacks; private, follower-only, expired, removed, or login-only content will still fail.
+For TikTok failures, ReelVault resolves short `vm.tiktok.com`, `vt.tiktok.com`, `/t/...`, and `/v/...` links to their canonical video URL before retrying, retries yt-dlp with multiple TikTok mobile API app ID and region profiles, then makes a final anonymous public-page pass that downloads direct video media from TikTok's public `SIGI_STATE`, `__UNIVERSAL_DATA_FOR_REHYDRATION__`, `playAddr`, `downloadAddr`, and `bitrateInfo.PlayAddr.UrlList` structures when exposed. It also accepts TikTok embed URLs, mobile/share URL forms, selected redirect wrappers, and protocol-relative embed/page URLs.
+
+For Instagram failures, ReelVault accepts `/reel/`, `/reels/`, username-prefixed media URLs, `/p/`, `/tv/`, story item URLs, and matching share URLs including `/share/reels/...`, retries common URL/embed variants, resolves `instagram.com/share/...` redirects before retrying, then makes a final anonymous public-page pass that downloads direct `og:video` or embedded `video_url` media if Instagram exposes one in the public HTML.
+
+For YouTube, ReelVault accepts common watch, Shorts, live, embed, nocookie embed, clip, attribution, redirect, source Shorts, legacy `watch_popup`/`movie_popup`, root `?v=...`, and YouTube Kids URL shapes, then normalizes them to a stable single-video URL before download. Protocol-relative YouTube URLs are normalized to `https://...`.
+
+For X/Twitter failures, ReelVault retries equivalent `x.com`, `twitter.com`, `i/web/status`, and legacy `/statuses/` URL shapes, then retries yt-dlp's legacy Twitter API selector. These are anonymous public-media fallbacks; private, follower-only, expired, removed, or login-only content will still fail.
 
 If the problem is Cloud Run egress, browser/TLS fingerprinting, transient provider errors, or request pacing rather than content access, tune `SOCIAL_DOWNLOAD_PROXY_URL`, `YT_DLP_IMPERSONATE_CLIENT`, `SOCIAL_DOWNLOAD_SOURCE_ADDRESS`, `SOCIAL_DOWNLOAD_USER_AGENT`, `SOCIAL_DOWNLOAD_ACCEPT_LANGUAGE`, `YT_DLP_RETRIES`, `YT_DLP_EXTRACTOR_RETRIES`, `YT_DLP_FRAGMENT_RETRIES`, `YT_DLP_FILE_ACCESS_RETRIES`, `YT_DLP_RETRY_SLEEP_SECONDS`, and/or the `YT_DLP_SLEEP_*` values. A proxy is not authentication; it only changes where yt-dlp's anonymous public requests originate. Use infrastructure you operate or have permission to use, and expect paid bandwidth if you use a proxy provider.
 
@@ -513,7 +519,18 @@ Check deployed runtime status:
 curl "$BASE_URL/health"
 ```
 
-The health response includes Cloud Run runtime identifiers (`K_SERVICE`, `K_REVISION`, `K_CONFIGURATION`) plus non-secret downloader diagnostics such as the deployed `yt_dlp_version`, build-time yt-dlp plugin package specs, loaded YouTube PO-token provider plugins, retry/timeout settings, and whether optional fallbacks like Cobalt, proxy, impersonation, custom headers, custom extractor args, Visitor Data, or PO Token settings are configured.
+The health response includes Cloud Run runtime identifiers (`K_SERVICE`, `K_REVISION`, `K_CONFIGURATION`) plus non-secret downloader diagnostics such as the deployed `yt_dlp_version`, build-time yt-dlp plugin package specs, loaded YouTube PO-token provider plugins, retry/timeout settings, and whether optional fallbacks like Cobalt, proxy, impersonation, custom headers, custom extractor args, Visitor Data, or PO Token settings are configured. It also includes `diagnostics.routes` and `url_support.features`, which are safe live markers for confirming whether parser-only changes have reached the currently deployed revision.
+
+Test URL parsing from the deployed Cloud Run revision without attempting a download:
+
+```bash
+curl -X POST "$BASE_URL/diagnostics/normalize" \
+  -H "Content-Type: application/json" \
+  -H "X-ReelVault-Task-Secret: $TASK_REQUEST_SECRET" \
+  -d '{"url":"https://www.youtube-nocookie.com/embed/jNQXAC9IVRw?rel=0"}'
+```
+
+This endpoint is protected by `TASK_REQUEST_SECRET` and returns the normalized provider, URL, shortcode, share-url flag, and runtime downloader diagnostics. It does not download media or write to Sheets, Drive, OpenAI, or Telegram. Use it when you need to verify whether Cloud Run understands a URL shape before testing a full download.
 
 Test provider download from the deployed Cloud Run revision:
 
@@ -683,7 +700,7 @@ The included tests cover social video URL extraction, Telegram pillar parsing/ca
 | YouTube download reports no supported JavaScript runtime | Use Docker or install Deno locally and make sure `deno` is on `PATH`. In Docker, confirm `/health` shows `youtube_pot_bgutil_http_provider_reachable=true` and use `/diagnostics/download` with debug logging if the local provider is not reachable. |
 | OpenAI transcription failed | Check `OPENAI_API_KEY`, audio file size, and `OPENAI_TRANSCRIPTION_MODEL`. Lower `MAX_AUDIO_SIZE_MB` only if your model limit is smaller. |
 | Provider download failed | This is expected for some links. The row will be saved for manual review. Try a fresh public video URL or set `ENABLE_VIDEO_DOWNLOAD=false` if you only want URL tracking. |
-| Provider works locally but fails on Cloud Run | Datacenter IPs are blocked more often. ReelVault retries several no-cookie YouTube client paths, anonymous Visitor Data, TikTok mobile API options, Instagram URL variants, optional Piped/Invidious YouTube mirrors including adaptive stream merge, and optional Cobalt fallback automatically when configured. Some links may still need Telegram upload fallback, a configured PO Token/provider, `YT_DLP_IMPERSONATE_CLIENT`, `SOCIAL_DOWNLOAD_PROXY_URL`, custom headers, higher `YT_DLP_*_RETRIES`, slower `YT_DLP_SLEEP_*` pacing, changed network egress, or intentionally enabled cookie fallback with `ENABLE_AUTH_COOKIES=true`. |
+| Provider works locally but fails on Cloud Run | Datacenter IPs are blocked more often. ReelVault retries several no-cookie YouTube client paths, anonymous Visitor Data, TikTok mobile API options, Instagram URL variants, optional Piped/Invidious YouTube mirrors including adaptive stream merge, and optional Cobalt fallback automatically when configured. Some links may still need Telegram upload fallback, a configured PO Token/provider, `YT_DLP_IMPERSONATE_CLIENT`, `SOCIAL_DOWNLOAD_PROXY_URL`, custom headers, higher `YT_DLP_*_RETRIES`, slower `YT_DLP_SLEEP_*` pacing, changed network egress, or intentionally enabled cookie fallback with `ENABLE_AUTH_COOKIES=true`. Use `/diagnostics/normalize` first to confirm URL parsing, then `/diagnostics/download` to test the actual anonymous download path. |
 | Telegram upload fallback fails | Check `ENABLE_TELEGRAM_MEDIA_FALLBACK`, file size, and whether Telegram Bot API can provide the uploaded file. Try sending the media as a document if sending as video fails. |
 
 ## How the Workflow Handles Failures
