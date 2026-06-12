@@ -109,7 +109,7 @@ def social_redirect_target_url(parsed, host: str) -> str | None:
     if host in {"l.instagram.com", "lm.instagram.com"}:
         target = first_query_value(query, "u")
     elif host in {"youtube.com", "m.youtube.com"} and parts[:1] == ["redirect"]:
-        target = first_query_value(query, "q") or first_query_value(query, "u")
+        target = first_query_value(query, "q") or first_query_value(query, "u") or first_query_value(query, "url")
     elif host == "tiktok.com" and parts[:2] == ["link", "v2"]:
         target = first_query_value(query, "target")
 
@@ -269,7 +269,7 @@ def normalize_youtube_url(raw_url: str) -> ReelReference | None:
 
 
 def youtube_attribution_target_url(query: dict[str, list[str]]) -> str | None:
-    target = first_query_value(query, "u") or first_query_value(query, "q")
+    target = first_query_value(query, "u") or first_query_value(query, "q") or first_query_value(query, "url")
     if not target:
         return None
     target = unquote(target)

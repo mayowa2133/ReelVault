@@ -101,6 +101,20 @@ def test_unwraps_supported_social_redirect_urls():
     ]
 
 
+def test_unwraps_youtube_url_query_redirect_targets():
+    references = SocialVideoService.extract_supported_urls(
+        """
+        redirect https://www.youtube.com/redirect?url=https%3A%2F%2Fwww.youtube.com%2Fshorts%2FURLREDIR1234
+        attribution https://www.youtube.com/attribution_link?url=%2Fwatch%3Fv%3DURLATTR1234
+        """
+    )
+
+    assert [(reference.shortcode, reference.url) for reference in references] == [
+        ("URLREDIR1234", "https://www.youtube.com/shorts/URLREDIR1234"),
+        ("URLATTR1234", "https://www.youtube.com/watch?v=URLATTR1234"),
+    ]
+
+
 def test_extracts_protocol_relative_social_video_urls():
     references = SocialVideoService.extract_supported_urls(
         """
