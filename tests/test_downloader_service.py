@@ -882,6 +882,13 @@ def test_instagram_public_filename_uses_shortcode_and_safe_extension():
         )
         == "BA123xyz.mp4"
     )
+    assert (
+        instagram_public_filename(
+            "https://www.instagram.com/stories/creator/3570766765028588805/",
+            "https://cdn.example/path/video.mov?token=abc",
+        )
+        == "3570766765028588805.mov"
+    )
 
 
 def test_download_instagram_public_media_downloads_og_video(tmp_path, monkeypatch):

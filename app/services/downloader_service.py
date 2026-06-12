@@ -1784,6 +1784,8 @@ def instagram_public_id(url: str) -> str:
     parts = [part for part in parsed.path.split("/") if part]
     if len(parts) >= 2 and parts[0].lower() in {"reel", "reels", "p", "tv"}:
         return safe_filename_id(parts[1])
+    if len(parts) >= 3 and parts[0].lower() == "stories":
+        return safe_filename_id(parts[2])
     if len(parts) >= 3 and parts[0].lower() == "share":
         return safe_filename_id(parts[2])
     if len(parts) >= 2 and parts[0].lower() == "share":
