@@ -9,6 +9,7 @@ from app.routes.sheets import router as sheets_router
 from app.routes.tasks import router as tasks_router
 from app.routes.telegram import router as telegram_router
 from app.services.downloader_service import downloader_runtime_info
+from app.services.social_video_service import SUPPORTED_URL_FEATURES
 from app.utils.errors import ReelVaultError, public_error_message
 from app.utils.logging import configure_logging, get_logger
 
@@ -43,6 +44,9 @@ def health() -> dict[str, object]:
                 for route in app.routes
                 if getattr(route, "path", "").startswith("/diagnostics/")
             ),
+        },
+        "url_support": {
+            "features": list(SUPPORTED_URL_FEATURES),
         },
         "downloader": downloader_runtime_info(settings),
     }

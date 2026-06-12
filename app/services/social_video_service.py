@@ -22,6 +22,21 @@ SOCIAL_URL_PATTERN = re.compile(
 
 TRAILING_PUNCTUATION = ".,!?;:)']}>"
 
+SUPPORTED_URL_FEATURES = (
+    "instagram_media_urls",
+    "instagram_share_urls",
+    "instagram_story_item_urls",
+    "instagram_username_media_urls",
+    "social_redirect_unwrapping",
+    "tiktok_embed_urls",
+    "tiktok_mobile_and_share_urls",
+    "x_twitter_status_urls",
+    "youtube_attribution_urls",
+    "youtube_clip_urls",
+    "youtube_redirect_urls",
+    "youtube_shorts_live_embed_urls",
+)
+
 
 class SocialVideoService:
     """URL extraction and normalization for yt-dlp-backed social videos."""
