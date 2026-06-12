@@ -7,19 +7,27 @@ from app.models.schemas import ReelReference
 
 
 SUPPORTED_SOCIAL_DOMAINS = (
+    "cleanvideosearch.com",
+    "deturl.com",
+    "hooktube.com",
     "instagram.com",
+    "pwnyoutube.com",
+    "tube.majestyc.net",
     "youtube.com",
     "youtube.googleapis.com",
     "youtube-nocookie.com",
     "youtubekids.com",
     "youtu.be",
+    "yourepeat.com",
+    "vid.plus",
+    "zwearz.com",
     "tiktok.com",
     "x.com",
     "twitter.com",
 )
 
 SOCIAL_URL_PATTERN = re.compile(
-    r"(?:instagram://media\?id=[^\s<>\"]+|(?:https?:)?//(?:[A-Za-z0-9-]+\.)?(?:instagram\.com|youtube\.googleapis\.com|youtube(?:-nocookie|kids)?\.com|youtu\.be|tiktok\.com|x\.com|twitter\.com)/[^\s<>\"]+)",
+    r"(?:instagram://media\?id=[^\s<>\"]+|(?:https?:)?//(?:[A-Za-z0-9-]+\.)?(?:cleanvideosearch\.com|deturl\.com|hooktube\.com|instagram\.com|pwnyoutube\.com|tube\.majestyc\.net|youtube\.googleapis\.com|youtube(?:-nocookie|kids)?\.com|youtu\.be|yourepeat\.com|vid\.plus|zwearz\.com|tiktok\.com|x\.com|twitter\.com)/[^\s<>\"]+)",
     flags=re.IGNORECASE,
 )
 
@@ -49,6 +57,7 @@ SUPPORTED_URL_FEATURES = (
     "youtube_semicolon_query_urls",
     "youtube_shorts_live_embed_urls",
     "youtube_source_shorts_urls",
+    "youtube_wrapper_host_urls",
 )
 
 
@@ -86,6 +95,11 @@ class SocialVideoService:
         if host == "instagram.com":
             return normalize_instagram_url(raw_url)
         if host in {
+            "cleanvideosearch.com",
+            "deturl.com",
+            "hooktube.com",
+            "pwnyoutube.com",
+            "tube.majestyc.net",
             "youtube.com",
             "m.youtube.com",
             "music.youtube.com",
@@ -93,6 +107,9 @@ class SocialVideoService:
             "youtube-nocookie.com",
             "youtubekids.com",
             "youtu.be",
+            "yourepeat.com",
+            "vid.plus",
+            "zwearz.com",
         }:
             return normalize_youtube_url(raw_url)
         if host in {"tiktok.com", "m.tiktok.com", "vm.tiktok.com", "vt.tiktok.com"}:
@@ -220,7 +237,7 @@ def normalize_youtube_url(raw_url: str) -> ReelReference | None:
     host = parsed.netloc.lower().removeprefix("www.")
     query = parse_query_values(parsed.query)
 
-    if host == "youtu.be":
+    if host in {"youtu.be", "vid.plus"}:
         video_id = first_path_part(parsed.path)
         if not video_id:
             return None
@@ -230,6 +247,44 @@ def normalize_youtube_url(raw_url: str) -> ReelReference | None:
             shortcode=video_id,
             provider="youtube",
         )
+
+    if host == "zwearz.com":
+        parts = [unquote(part) for part in parsed.path.split("/") if part]
+        if len(parts) >= 2 and parts[0].lower() == "watch":
+            video_id = parts[1]
+            return ReelReference(
+                url=f"https://youtu.be/{quote(video_id)}",
+                raw_url=raw_url,
+                shortcode=video_id,
+                provider="youtube",
+            )
+        return None
+
+    if host == "cleanvideosearch.com":
+        video_id = first_query_value(query, "videoId")
+        if not video_id:
+            return None
+        return ReelReference(
+            url=f"https://www.youtube.com/watch?v={quote(video_id)}",
+            raw_url=raw_url,
+            shortcode=video_id,
+            provider="youtube",
+        )
+
+    youtube_wrapper_hosts = {
+        "deturl.com",
+        "hooktube.com",
+        "pwnyoutube.com",
+        "tube.majestyc.net",
+        "yourepeat.com",
+    }
+    if host == "deturl.com" and parsed.path.lower().startswith("/www.youtube.com/"):
+        youtube_path = parsed.path.removeprefix("/www.youtube.com")
+        parsed = urlsplit(urlunsplit(("https", "www.youtube.com", youtube_path, parsed.query, parsed.fragment)))
+        host = parsed.netloc.lower().removeprefix("www.")
+        query = parse_query_values(parsed.query)
+    elif host in youtube_wrapper_hosts:
+        host = "youtube.com"
 
     if host not in {
         "youtube.com",

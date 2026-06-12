@@ -143,6 +143,32 @@ def test_extracts_youtube_semicolon_query_urls():
     ]
 
 
+def test_extracts_youtube_wrapper_host_urls():
+    references = SocialVideoService.extract_supported_urls(
+        """
+        deturl https://deturl.com/www.youtube.com/watch?v=WRAPPER001A
+        pwn https://pwnyoutube.com/watch?v=WRAPPER001B
+        hooktube https://hooktube.com/embed/WRAPPER001C
+        yourepeat https://yourepeat.com/watch?v=WRAPPER001D
+        majestyc https://tube.majestyc.net/watch?v=WRAPPER001E
+        vidplus https://vid.plus/WRAPPER001F
+        zwearz https://zwearz.com/watch/WRAPPER001G
+        clean https://cleanvideosearch.com/media/action/yt/watch?videoId=WRAPPER001H
+        """
+    )
+
+    assert [(reference.shortcode, reference.url) for reference in references] == [
+        ("WRAPPER001A", "https://www.youtube.com/watch?v=WRAPPER001A"),
+        ("WRAPPER001B", "https://www.youtube.com/watch?v=WRAPPER001B"),
+        ("WRAPPER001C", "https://www.youtube.com/embed/WRAPPER001C"),
+        ("WRAPPER001D", "https://www.youtube.com/watch?v=WRAPPER001D"),
+        ("WRAPPER001E", "https://www.youtube.com/watch?v=WRAPPER001E"),
+        ("WRAPPER001F", "https://youtu.be/WRAPPER001F"),
+        ("WRAPPER001G", "https://youtu.be/WRAPPER001G"),
+        ("WRAPPER001H", "https://www.youtube.com/watch?v=WRAPPER001H"),
+    ]
+
+
 def test_extracts_protocol_relative_social_video_urls():
     references = SocialVideoService.extract_supported_urls(
         """

@@ -29,6 +29,7 @@ def test_health_includes_downloader_runtime_info():
     assert "youtube_redirect_urls" in body["url_support"]["features"]
     assert "youtube_semicolon_query_urls" in body["url_support"]["features"]
     assert "youtube_source_shorts_urls" in body["url_support"]["features"]
+    assert "youtube_wrapper_host_urls" in body["url_support"]["features"]
     assert body["downloader"]["yt_dlp_available"] is True
     assert body["downloader"]["yt_dlp_version"]
     assert "yt_dlp_package_spec" in body["downloader"]
