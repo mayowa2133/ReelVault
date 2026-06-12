@@ -16,6 +16,7 @@ import httpx
 from app.config import Settings
 from app.models.schemas import DownloadResult
 from app.services.cobalt_service import CobaltService, parse_cobalt_base_urls, unique_output_path
+from app.services.social_video_service import YOUTUBE_INVIDIOUS_HOSTS
 from app.services.youtube_mirror_service import YoutubeMirrorService, youtube_video_id
 from app.utils.errors import DownloadFailedError, ExternalServiceError, public_error_message
 from app.utils.logging import get_logger
@@ -69,6 +70,24 @@ class TikTokNoAuthFallbackStrategy:
 
 
 YOUTUBE_FALLBACK_FORMAT = "18/best[ext=mp4]/bestvideo+bestaudio/best"
+YOUTUBE_CANONICAL_HOSTS = {"youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}
+YOUTUBE_ALTERNATE_SINGLE_VIDEO_HOSTS = {
+    "cleanvideosearch.com",
+    "deturl.com",
+    "hooktube.com",
+    "pwnyoutube.com",
+    "tube.majestyc.net",
+    "youtube.googleapis.com",
+    "youtube-nocookie.com",
+    "youtubekids.com",
+    "yourepeat.com",
+    "vid.plus",
+    "zwearz.com",
+    *YOUTUBE_INVIDIOUS_HOSTS,
+}
+YOUTUBE_RETRY_HOSTS = YOUTUBE_CANONICAL_HOSTS | YOUTUBE_ALTERNATE_SINGLE_VIDEO_HOSTS
+YOUTUBE_MIRROR_HOSTS = YOUTUBE_CANONICAL_HOSTS | {"youtube-nocookie.com", "youtubekids.com", "youtube.googleapis.com"}
+YOUTUBE_COBALT_HOSTS = YOUTUBE_MIRROR_HOSTS
 YOUTUBE_NO_AUTH_FALLBACK_STRATEGIES = (
     YoutubeNoAuthFallbackStrategy(
         name="mweb_no_webpage_configs",
@@ -721,7 +740,7 @@ class DownloaderService:
         output_dir: Path,
         initial_reason: str,
     ) -> tuple[dict[str, Any], Path | None, str | None]:
-        if provider_host(url) not in {"youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}:
+        if provider_host(url) not in YOUTUBE_MIRROR_HOSTS:
             return {}, None, initial_reason
         if not (self.settings.youtube_piped_api_base_urls or self.settings.youtube_invidious_base_urls):
             return {}, None, initial_reason
@@ -1868,7 +1887,7 @@ def short_error(reason: str, max_length: int = 300) -> str:
 def should_retry_youtube_without_webpage(url: str, error_message: str) -> bool:
     parsed = urlsplit(url)
     host = parsed.netloc.lower().removeprefix("www.")
-    if host not in {"youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}:
+    if host not in YOUTUBE_RETRY_HOSTS:
         return False
 
     lowered = error_message.lower()
@@ -1954,7 +1973,7 @@ def should_retry_x_with_api_fallbacks(url: str, _error_message: str) -> bool:
 def download_failure_guidance(url: str, settings: Settings) -> dict[str, str | list[str]]:
     host = provider_host(url)
 
-    if host in {"youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}:
+    if host in YOUTUBE_RETRY_HOSTS:
         next_steps = [
             "Built-in YouTube no-auth yt-dlp, PO-token provider, client, Visitor Data, and public mirror/Cobalt hooks have been exhausted for this request.",
         ]
@@ -2035,10 +2054,6 @@ def format_download_failure_guidance(guidance: dict[str, str | list[str]]) -> st
 def should_try_cobalt_fallback(url: str) -> bool:
     return provider_host(url) in {
         "instagram.com",
-        "youtube.com",
-        "m.youtube.com",
-        "music.youtube.com",
-        "youtu.be",
         "tiktok.com",
         "m.tiktok.com",
         "vm.tiktok.com",
@@ -2046,6 +2061,7 @@ def should_try_cobalt_fallback(url: str) -> bool:
         "x.com",
         "twitter.com",
         "mobile.twitter.com",
+        *YOUTUBE_COBALT_HOSTS,
     }
 
 

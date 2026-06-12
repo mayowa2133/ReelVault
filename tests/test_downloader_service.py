@@ -276,6 +276,12 @@ def test_download_failure_guidance_for_youtube_lists_remaining_external_options(
     assert any("ENABLE_AUTH_COOKIES=true" in step for step in guidance["next_steps"])
 
 
+def test_download_failure_guidance_classifies_youtube_alternate_hosts():
+    guidance = download_failure_guidance("https://redirect.invidious.io/watch?v=jNQXAC9IVRw", Settings())
+
+    assert guidance["category"] == "youtube_anonymous_exhausted"
+
+
 def test_download_failure_guidance_omits_configured_youtube_options():
     guidance = download_failure_guidance(
         "https://www.youtube.com/watch?v=jNQXAC9IVRw",
@@ -508,6 +514,19 @@ def test_youtube_generic_extraction_error_is_retryable():
         "https://www.youtube.com/watch?v=jNQXAC9IVRw",
         "ERROR: [youtube] jNQXAC9IVRw: Unable to extract streaming data; HTTP Error 503: Service Unavailable",
     )
+
+
+def test_youtube_alternate_single_video_hosts_are_retryable():
+    for url in (
+        "https://www.youtube-nocookie.com/embed/jNQXAC9IVRw",
+        "https://www.youtubekids.com/watch?v=jNQXAC9IVRw",
+        "https://youtube.googleapis.com/v/jNQXAC9IVRw",
+        "https://redirect.invidious.io/watch?v=jNQXAC9IVRw",
+    ):
+        assert should_retry_youtube_without_webpage(
+            url,
+            "ERROR: [youtube] jNQXAC9IVRw: Failed to extract any player response",
+        )
 
 
 def test_youtube_private_error_is_not_retryable():
@@ -972,8 +991,12 @@ def test_download_instagram_public_media_downloads_og_video(tmp_path, monkeypatc
 
 def test_cobalt_fallback_is_limited_to_supported_provider_hosts():
     assert should_try_cobalt_fallback("https://www.youtube.com/watch?v=jNQXAC9IVRw")
+    assert should_try_cobalt_fallback("https://www.youtube-nocookie.com/embed/jNQXAC9IVRw")
+    assert should_try_cobalt_fallback("https://www.youtubekids.com/watch?v=jNQXAC9IVRw")
+    assert should_try_cobalt_fallback("https://youtube.googleapis.com/v/jNQXAC9IVRw")
     assert should_try_cobalt_fallback("https://www.instagram.com/reel/ABC123/")
     assert should_try_cobalt_fallback("https://www.tiktok.com/@creator/video/7253412088251534594")
+    assert not should_try_cobalt_fallback("https://redirect.invidious.io/watch?v=jNQXAC9IVRw")
     assert not should_try_cobalt_fallback("https://example.com/video")
 
 
